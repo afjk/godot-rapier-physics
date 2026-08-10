@@ -120,14 +120,14 @@ impl IRapierShape for RapierConcavePolygonShape {
         let mut arr = PackedVectorArray::new();
         for ind in indices {
             if let Some(point) = points.get(ind[0] as usize) {
-                arr.push(Vector2::new(point.coords.x, point.coords.y));
+                arr.push(Vector2::new(point.x, point.y));
             } else {
                 godot_error!("ConcavePolygon index out of bounds");
                 arr.clear();
                 break;
             }
             if let Some(point) = points.get(ind[1] as usize) {
-                arr.push(Vector2::new(point.coords.x, point.coords.y));
+                arr.push(Vector2::new(point.x, point.y));
             } else {
                 godot_error!("ConcavePolygon index out of bounds");
                 arr.clear();
@@ -143,21 +143,21 @@ impl IRapierShape for RapierConcavePolygonShape {
         let mut arr = PackedVectorArray::new();
         for ind in indices {
             if let Some(point) = points.get(ind[0] as usize) {
-                arr.push(Vector3::new(point.coords.x, point.coords.y, point.coords.z));
+                arr.push(Vector3::new(point.x, point.y, point.z));
             } else {
                 godot_error!("ConcavePolygon index out of bounds");
                 arr.clear();
                 break;
             }
             if let Some(point) = points.get(ind[1] as usize) {
-                arr.push(Vector3::new(point.coords.x, point.coords.y, point.coords.z));
+                arr.push(Vector3::new(point.x, point.y, point.z));
             } else {
                 godot_error!("ConcavePolygon index out of bounds");
                 arr.clear();
                 break;
             }
             if let Some(point) = points.get(ind[2] as usize) {
-                arr.push(Vector3::new(point.coords.x, point.coords.y, point.coords.z));
+                arr.push(Vector3::new(point.x, point.y, point.z));
             } else {
                 godot_error!("ConcavePolygon index out of bounds");
                 arr.clear();
@@ -238,7 +238,7 @@ mod tests {
                 Vector::splat(4.0),
                 Vector::splat(5.0),
             ]);
-            let _ = dict.insert("faces", arr);
+            let _ = dict.insert("faces", &arr.to_variant());
             concave_shape.set_data(dict.to_variant(), &mut physics_data().physics_engine);
             let data: PackedVectorArray = concave_shape
                 .get_data(&physics_data().physics_engine)

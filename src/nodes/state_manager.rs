@@ -205,6 +205,10 @@ impl StateManager {
     #[func]
     // Can submit an index of -1 to remove the last cached state.
     fn remove_cached_by_index(&mut self, at_index: i32) {
+        if self.cached_states.is_empty() {
+            godot_error!("Tried to remove cached state, but cache is empty.");
+            return;
+        }
         let usize_index = {
             if at_index < -1 {
                 godot_error!(
@@ -472,8 +476,7 @@ impl StateManager {
                 nodes_to_remove.insert(nodepath_str);
                 continue;
             }
-            let full_path_string = loaded_state.root_node.clone().to_string() + "/" + &nodepath_str;
-            let nodepath = NodePath::from(&full_path_string);
+            let nodepath = StateManager::absolute_nodepath(&loaded_state.root_node, &nodepath_str);
             // I think if the body's shapes have changed, this won't necessarily catch it smoothly.
             if let Some(object_state_with_shapes) =
                 loaded_state.physics_objects_state.remove(&nodepath_str)
@@ -495,7 +498,7 @@ impl StateManager {
                                 continue;
                             }
                         };
-                        for i in shape_states.len()..0 {
+                        for i in (0..shape_states.len()).rev() {
                             if let Some(shape) =
                                 co2d.shape_owner_get_shape(shape_owner_id, i as i32)
                             {
@@ -526,7 +529,7 @@ impl StateManager {
                                 continue;
                             }
                         };
-                        for i in shape_states.len()..0 {
+                        for i in (0..shape_states.len()).rev() {
                             if let Some(shape) =
                                 co3d.shape_owner_get_shape(shape_owner_id, i as i32)
                             {
@@ -569,21 +572,19 @@ impl StateManager {
     // Outputs the whole state of our physics server, along with the states of all the physics nodes.
     fn fetch_state<'a>(&'a self, in_space: Rid) -> Option<RawExportState<'a>> {
         if let Some(root_node) = &self.root_node {
-            let root_nodepath = root_node.get_path();
+            let root_nodepath = root_node.get_path().to_string();
             // Each physics node gets its own variant vector. The first entry in this vector will be that node's serialized data;
             // if the node has nested data (eg if it's a 2D or 3D CollisionObject), then it will also have a second entry,
             // which will be a nested dictionary containing data on all its shapes.
             let physics_nodes = StateManager::get_all_physics_nodes_in_space(root_node, in_space);
             let mut object_states: BTreeMap<String, CollatedObjectExportState> = BTreeMap::new();
             for nodepath_str in physics_nodes {
-                let full_path_string = root_nodepath.to_string() + "/" + &nodepath_str;
-                let nodepath = NodePath::from(&full_path_string);
+                let nodepath = StateManager::absolute_nodepath(&root_nodepath, &nodepath_str);
                 let collated_state: CollatedObjectExportState = {
                     let mut self_state: Option<ObjectExportState> = None;
                     let mut collated_shape_owners: BTreeMap<String, Vec<ObjectExportState>> =
                         BTreeMap::new();
-                    if let Some(mut co2d) =
-                        self.base().try_get_node_as::<CollisionObject2D>(&nodepath)
+                    if let Some(co2d) = self.base().try_get_node_as::<CollisionObject2D>(&nodepath)
                     {
                         let this_rid = co2d.get_rid();
                         self_state = self.get_physics_node_state(this_rid);
@@ -606,7 +607,7 @@ impl StateManager {
                         }
                     }
                     // Maybe could be tidier as a macro, to avoid duplication between 2D and 3D.
-                    else if let Some(mut co3d) =
+                    else if let Some(co3d) =
                         self.base().try_get_node_as::<CollisionObject3D>(&nodepath)
                     {
                         let this_rid = co3d.get_rid();
@@ -673,7 +674,7 @@ impl StateManager {
             };
             // So now we have our whole composed raw state, ready to serialize to json or binary.
             let raw_state = RawExportState {
-                root_node: root_nodepath.to_string(),
+                root_node: root_nodepath,
                 rapier_space: space_state,
                 physics_server_id: physics_server_index,
                 physics_objects_state: object_states,
@@ -744,7 +745,7 @@ impl StateManager {
                 .or_else(|| {
                     root_node
                         .clone()
-                        .try_cast::<CollisionObject2D>()
+                        .try_cast::<CollisionObject3D>()
                         .ok()
                         .map(|n| n.get_rid())
                 })
@@ -770,7 +771,7 @@ impl StateManager {
                     &physics_data.ids,
                 )
             {
-                physics_nodepaths.push(root_node.get_name().to_string());
+                physics_nodepaths.push(".".to_string());
             }
         }
         let all_descendants = StateManager::collect_all_children_recursive(root_node);
@@ -784,7 +785,7 @@ impl StateManager {
                     .or_else(|| {
                         child
                             .clone()
-                            .try_cast::<CollisionObject2D>()
+                            .try_cast::<CollisionObject3D>()
                             .ok()
                             .map(|n| n.get_rid())
                     })
@@ -817,9 +818,20 @@ impl StateManager {
         physics_nodepaths
     }
 
+    fn absolute_nodepath(root_nodepath: &str, relative_nodepath: &str) -> NodePath {
+        if relative_nodepath == "." || relative_nodepath.is_empty() {
+            NodePath::from(root_nodepath)
+        } else {
+            NodePath::from(&(root_nodepath.to_string() + "/" + relative_nodepath))
+        }
+    }
+
     fn collect_all_children_recursive(node: &Gd<Node>) -> Vec<Gd<Node>> {
         let mut descendants = Vec::new();
         for child in node.get_children().iter_shared() {
+            if !child.is_instance_valid() {
+                continue;
+            }
             descendants.push(child.clone());
             descendants.extend(StateManager::collect_all_children_recursive(&child));
         }
@@ -830,7 +842,8 @@ impl StateManager {
         if let Some(state) = RapierPhysicsServer::fetch_state_internal(rid) {
             Some(state)
         } else {
-            panic!("No physics state found for Rid {:?}", rid);
+            godot_error!("No physics state found for Rid {:?}", rid);
+            None
         }
     }
 }

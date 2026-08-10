@@ -90,12 +90,16 @@ impl IRapierShape for RapierHeightMapShape3D {
             godot_error!("Invalid heightmap shape data type. Got {}", data);
             return;
         }
-        if heights.len() != (width * depth) as usize {
-            godot_error!("Invalid heightmap shape data");
-            return;
-        }
         if width <= 1 || depth <= 1 {
             godot_error!("Heightmap must have width and depth at least 2");
+            return;
+        }
+        let Some(height_count) = width.checked_mul(depth) else {
+            godot_error!("Invalid heightmap shape data");
+            return;
+        };
+        if heights.len() != height_count as usize {
+            godot_error!("Invalid heightmap shape data");
             return;
         }
         physics_engine.shape_create_heightmap(heights.as_slice(), width, depth, self.base.get_id());
@@ -112,7 +116,7 @@ impl IRapierShape for RapierHeightMapShape3D {
             packed_heights.push(*h)
         }
         let heights_variant = packed_heights.to_variant();
-        let _ = dictionary.insert("heights", heights_variant);
+        let _ = dictionary.insert("heights", &heights_variant);
         dictionary.to_variant()
     }
 }

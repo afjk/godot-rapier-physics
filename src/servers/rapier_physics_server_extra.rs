@@ -29,6 +29,7 @@ macro_rules! make_rapier_server_godot_impl {
         use $crate::bodies::rapier_collision_object::IRapierCollisionObject;
         use $crate::fluids::rapier_fluid::RapierFluid;
         use $crate::joints::rapier_joint::IRapierJoint;
+        use $crate::joints::rapier_joint::RapierJoint;
         use $crate::joints::rapier_joint_base::RapierJointType;
         use $crate::servers::RapierPhysicsServer;
         use $crate::servers::rapier_physics_server_extra::RapierBodyParam;
@@ -145,7 +146,7 @@ macro_rules! make_rapier_server_godot_impl {
                     let target_isometry = {
                         let position = vector_to_rapier(target_transform.origin);
                         let rotation = transform_rotation_rapier(&target_transform);
-                        rapier::prelude::Isometry::from_parts(position.into(), rotation)
+                        rapier::prelude::Pose::from_parts(position, rotation)
                     };
                     physics_data.physics_engine.multibody_solve_ik(
                         space_handle,
@@ -183,11 +184,13 @@ macro_rules! make_rapier_server_godot_impl {
                     use rapier::dynamics::InverseKinematicsOption;
                     use rapier::dynamics::JointAxesMask;
                     let options = InverseKinematicsOption {
-                        damping,
-                        max_iters: max_iterations as usize,
-                        constrained_axes: JointAxesMask::from_bits_truncate(constrained_axes as u8),
-                        epsilon_linear,
-                        epsilon_angular,
+                        damping: damping.max(0.0),
+                        max_iters: max_iterations.max(0) as usize,
+                        constrained_axes: JointAxesMask::from_bits_truncate(
+                            constrained_axes.max(0) as u8,
+                        ),
+                        epsilon_linear: epsilon_linear.max(0.0),
+                        epsilon_angular: epsilon_angular.max(0.0),
                     };
                     joint_obj.get_mut_base().custom_ik_options = options;
                 }
@@ -201,6 +204,28 @@ macro_rules! make_rapier_server_godot_impl {
                 if let Some(joint_obj) = physics_data.joints.get_mut(&joint) {
                     use rapier::dynamics::InverseKinematicsOption;
                     joint_obj.get_mut_base().custom_ik_options = InverseKinematicsOption::default();
+                }
+            }
+
+            #[func]
+            pub fn joint_set_motor_position_options(
+                joint: Rid,
+                target_pos: real,
+                stiffness: real,
+                damping: real,
+                enabled: bool,
+            ) {
+                let physics_data = physics_data();
+                if let Some(RapierJoint::RapierRevoluteJoint(revolute)) =
+                    physics_data.joints.get_mut(&joint)
+                {
+                    revolute.set_motor_position_options(
+                        &mut physics_data.physics_engine,
+                        target_pos,
+                        stiffness,
+                        damping,
+                        enabled,
+                    )
                 }
             }
 

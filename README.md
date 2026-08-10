@@ -75,21 +75,21 @@ patched Rapier backend:
 
 ```bash
 cargo build --release --locked --no-default-features \
-  --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity"
+  --features="single-dim3,serde-serialize,scenesync-parity,api-4-6"
 ```
 
 The feature registers `SceneSyncRapierWorld3D`, a separate deterministic world
 with `configure`, `add_body`, `remove_body`, `step_to`, `get_body_state`, and
 `get_canonical_state_hash` methods. `add_body` accepts SceneSync wire field names.
 The standard `Rapier3D` PhysicsServer remains unchanged and continues to use the
-plugin's patched Rapier dependency; only `SceneSyncRapierWorld3D` is pinned to the
+plugin's regular Rapier dependency; only `SceneSyncRapierWorld3D` is pinned to the
 canonical SceneSync core.
 
 Run the shared-profile hash tests with:
 
 ```bash
 cargo test --locked --no-default-features \
-  --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity" \
+  --features="single-dim3,serde-serialize,scenesync-parity,api-4-6" \
   --lib scenesync_parity
 ```
 
@@ -97,14 +97,15 @@ Prebuilt SceneSync releases are published from fixed `scenesync-v*` tags. The
 combined addon archive contains Godot 4.6.3 binaries for Linux x86_64, Windows
 x86_64, macOS universal (arm64 and x86_64), and Android arm64. Copy its `addons`
 directory into the Godot project and verify the archive against `SHA256SUMS`.
-The extension is generated against Godot's forward-compatible 4.5 GDExtension
-API because `godot-rust 0.4.5` cannot generate bindings from the 4.6.3 API; the
-addon descriptor requires Godot 4.6 or newer.
+The extension is built against the Godot 4.6 GDExtension API with godot-rust
+0.5.x, and the addon descriptor requires Godot 4.6 or newer. This avoids the
+Android `StringName` lifetime failure seen when older 4.5 bindings are used with
+a Godot 4.6.3 Quest export template.
 
 Every release is gated by the browser-compatible freefall, contact, and rotating
 contact hashes on Linux x86_64/arm64, Windows x86_64, and macOS x86_64/arm64.
-Android arm64 is cross-compiled from the same locked source and feature set;
-device execution remains part of the consuming SDK's Quest smoke test.
+Android arm64 is cross-compiled from the same locked source and feature set and
+is exercised by the consuming SDK's Quest smoke test.
 
 # Youtube Videos
 

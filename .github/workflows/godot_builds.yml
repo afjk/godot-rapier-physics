@@ -14,18 +14,19 @@ jobs:
         features: ["simd-parallel", "enhanced-determinism"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Update plugin.info.cfg
         shell: sh
         run: |
           sed -i "s/<flavour>/godot-rapier-2d-${{ matrix.precision }}-${{ matrix.features }}/g" bin2d/addons/godot-rapier2d/plugin.info.cfg
           sed -i "s/<flavour>/godot-rapier-3d-${{ matrix.precision }}-${{ matrix.features }}/g" bin3d/addons/godot-rapier3d/plugin.info.cfg
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: godot-rapier-${{ matrix.dimensions }}-${{ matrix.precision }}-${{ matrix.features }}-gdext
           path: |
             bin${{ matrix.dimensions }}
+            !bin${{ matrix.dimensions }}/samples/*
             !bin${{ matrix.dimensions }}/test/*
             !bin${{ matrix.dimensions }}/tests/*
             !bin${{ matrix.dimensions }}/base/*
@@ -42,4 +43,11 @@ jobs:
             !bin${{ matrix.dimensions }}/test.gd
             !bin${{ matrix.dimensions }}/test.gd.uid
             !bin${{ matrix.dimensions }}/test.tscn
+            !bin${{ matrix.dimensions }}/test_motor_position.gd
+            !bin${{ matrix.dimensions }}/test_motor_position.gd.uid
+            !bin${{ matrix.dimensions }}/test_motor_position.tscn
+            !bin${{ matrix.dimensions }}/test_motor_position_beam.gd
+            !bin${{ matrix.dimensions }}/test_motor_position_beam.gd.uid
+            !bin${{ matrix.dimensions }}/test_motor_position_spawner.gd
+            !bin${{ matrix.dimensions }}/test_motor_position_spawner.gd.uid
           if-no-files-found: error

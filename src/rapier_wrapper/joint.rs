@@ -1,18 +1,22 @@
 use godot::global::godot_error;
+#[cfg(feature = "dim2")]
+use rapier::na::ComplexField;
 use rapier::prelude::*;
 
 use crate::joints::rapier_joint_base::RapierJointType;
+#[cfg(feature = "dim3")]
+use crate::rapier_wrapper::joint::glamx::Quat;
 use crate::rapier_wrapper::prelude::*;
 impl PhysicsEngine {
     #[cfg(feature = "dim2")]
     fn godot_spring_to_rapier_accel(stiffness: Real, damping: Real) -> (Real, Real) {
         // Godot stiffness is in N/m, convert to frequency: omega = sqrt(k/m)
         // For AccelerationBased, assume unit mass (m=1)
-        let omega = stiffness.sqrt();
+        let omega: Real = ComplexField::sqrt(stiffness);
         // Calculate damping ratio from Godot damping: zeta = c / (2 * sqrt(k*m))
         // For unit mass: zeta = c / (2 * sqrt(k))
         let damping_ratio = if stiffness > 0.0 {
-            damping / (2.0 * stiffness.sqrt())
+            damping / (2.0 * omega)
         } else {
             0.0
         };
@@ -56,7 +60,7 @@ impl PhysicsEngine {
         &mut self,
         world_handle: WorldHandle,
         joint_handle: JointHandle,
-        target_transform: Isometry<Real>,
+        target_transform: Pose,
         options: InverseKinematicsOption,
     ) {
         let Some(physics_world) = self.get_mut_world(world_handle) else {
@@ -109,8 +113,8 @@ impl PhysicsEngine {
         if let Some(physics_world) = self.get_world(world_handle)
             && let Some(joint) = physics_world.get_impulse_joint(joint_handle)
         {
-            body1 = Some(joint.body1);
-            body2 = Some(joint.body2);
+            body1 = Some(joint.body1());
+            body2 = Some(joint.body2());
         }
         if let Some(body1) = body1
             && let Some(body2) = body2
@@ -127,29 +131,36 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
         angular_limit_lower: Real,
         angular_limit_upper: Real,
         angular_limit_enabled: bool,
         motor_target_velocity: Real,
         motor_enabled: bool,
         joint_type: RapierJointType,
+        motor_target_position: Real,
+        motor_stiffness: Real,
+        motor_damping: Real,
+        motor_position_enabled: bool,
         disable_collision: bool,
     ) -> JointHandle {
         self.body_wake_up(world_handle, body_handle_1, false);
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
             let mut joint = RevoluteJointBuilder::new()
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
-                .contacts_enabled(!disable_collision);
+                .local_anchor1(anchor_1)
+                .local_anchor2(anchor_2)
+                .contacts_enabled(!disable_collision)
+                .motor_max_force(Real::MAX)
+                .motor_model(MotorModel::ForceBased);
             if angular_limit_enabled {
                 joint = joint.limits([angular_limit_lower, angular_limit_upper]);
             }
             if motor_enabled {
-                joint = joint.motor_velocity(motor_target_velocity, 0.0);
-                joint = joint.motor_model(MotorModel::AccelerationBased);
+                joint = joint.motor_velocity(motor_target_velocity, 0.0)
+            } else if motor_position_enabled {
+                joint = joint.motor_position(motor_target_position, motor_stiffness, motor_damping)
             }
             return physics_world.insert_joint(body_handle_1, body_handle_2, joint_type, joint);
         }
@@ -163,36 +174,57 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
-        axis_1: Rotation<Real>,
-        axis_2: Rotation<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
+        axis_1: Rotation,
+        axis_2: Rotation,
         angular_limit_lower: Real,
         angular_limit_upper: Real,
         angular_limit_enabled: bool,
         motor_target_velocity: Real,
         motor_enabled: bool,
         joint_type: RapierJointType,
+        motor_target_position: Real,
+        motor_stiffness: Real,
+        motor_damping: Real,
+        motor_position_enabled: bool,
+        motor_max_force: Real,
         disable_collision: bool,
     ) -> JointHandle {
         self.body_wake_up(world_handle, body_handle_1, false);
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
-            // Extract the hinge axis (X-axis) from the rotation matrices
-            let axis1_vec = axis_1 * Vector::x_axis();
-            let axis2_vec = axis_2 * Vector::x_axis();
+            // Rapier revolute hinge axis is X, but godot is Z
+            // Transforming poses from z to x so that we can use the simplified Rapier
+            // revolute joint functions in other parts of code
+            // (rather than setting up a GenericJoint with AngZ free axis)
+            let z_to_x =
+                Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), std::f32::consts::FRAC_PI_2);
+            let pose_1 = Pose::from_parts(anchor_1, axis_1 * z_to_x);
+            let pose_2 = Pose::from_parts(anchor_2, axis_2 * z_to_x);
             // Use GenericJointBuilder to set both local axes
             let mut joint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
-                .local_axis1(axis1_vec)
-                .local_axis2(axis2_vec)
+                .local_frame1(pose_1)
+                .local_frame2(pose_2)
                 .contacts_enabled(!disable_collision);
             if angular_limit_enabled {
                 joint = joint.limits(JointAxis::AngX, [angular_limit_lower, angular_limit_upper]);
             }
             if motor_enabled {
-                joint = joint.motor_velocity(JointAxis::AngX, motor_target_velocity, 0.0);
+                joint = joint
+                    .motor_velocity(JointAxis::AngX, motor_target_velocity, 0.0)
+                    .motor_model(JointAxis::AngX, MotorModel::AccelerationBased)
+                    .motor_max_force(JointAxis::AngX, motor_max_force);
+            } else if motor_position_enabled {
+                joint = joint
+                    .motor_position(
+                        JointAxis::AngX,
+                        motor_target_position,
+                        motor_stiffness,
+                        motor_damping,
+                    )
+                    .motor_max_force(JointAxis::AngX, Real::MAX)
+                    .motor_model(JointAxis::AngX, MotorModel::AccelerationBased);
             }
             return physics_world.insert_joint(
                 body_handle_1,
@@ -211,8 +243,8 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
         joint_type: RapierJointType,
         disable_collision: bool,
     ) -> JointHandle {
@@ -220,8 +252,8 @@ impl PhysicsEngine {
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
             let joint = SphericalJointBuilder::new()
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
+                .local_anchor1(anchor_1)
+                .local_anchor2(anchor_2)
                 .contacts_enabled(!disable_collision);
             return physics_world.insert_joint(body_handle_1, body_handle_2, joint_type, joint);
         }
@@ -235,10 +267,10 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
-        axis_1: Rotation<Real>,
-        axis_2: Rotation<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
+        axis_1: Rotation,
+        axis_2: Rotation,
         linear_limit_upper: f32,
         linear_limit_lower: f32,
         joint_type: RapierJointType,
@@ -247,15 +279,12 @@ impl PhysicsEngine {
         self.body_wake_up(world_handle, body_handle_1, false);
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
-            // Extract the X axis from the rotation matrices
-            let axis1_vec = axis_1 * Vector::x_axis();
-            let axis2_vec = axis_2 * Vector::x_axis();
+            let pose_1 = Pose::from_parts(anchor_1, axis_1);
+            let pose_2 = Pose::from_parts(anchor_2, axis_2);
             // Use GenericJointBuilder to set both local axes for prismatic joint
             let joint = GenericJointBuilder::new(JointAxesMask::LOCKED_PRISMATIC_AXES)
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
-                .local_axis1(axis1_vec)
-                .local_axis2(axis2_vec)
+                .local_frame1(pose_1)
+                .local_frame2(pose_2)
                 .limits(JointAxis::LinX, [linear_limit_lower, linear_limit_upper])
                 .contacts_enabled(!disable_collision);
             return physics_world.insert_joint(
@@ -290,8 +319,8 @@ impl PhysicsEngine {
         &mut self,
         world_handle: WorldHandle,
         joint_handle: JointHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
     ) {
         self.joint_wake_up_connected_rigidbodies(world_handle, joint_handle);
         if let Some(physics_world) = self.get_mut_world(world_handle)
@@ -299,8 +328,8 @@ impl PhysicsEngine {
             && let Some(joint) = joint.as_spherical_mut()
         {
             joint
-                .set_local_anchor1(Point { coords: anchor_1 })
-                .set_local_anchor2(Point { coords: anchor_2 });
+                .set_local_anchor1(anchor_1)
+                .set_local_anchor2(anchor_2);
         }
     }
 
@@ -315,30 +344,60 @@ impl PhysicsEngine {
         motor_target_velocity: Real,
         motor_enabled: bool,
         softness: Real,
+        motor_target_position: Real,
+        motor_stiffness: Real,
+        motor_damping: Real,
+        motor_position_enabled: bool,
+        bias: Real,
+        physics_step: Real,
+        #[cfg(feature = "dim3")] motor_max_force: Real,
     ) {
         self.joint_wake_up_connected_rigidbodies(world_handle, joint_handle);
         if let Some(physics_world) = self.get_mut_world(world_handle)
             && let Some(joint) = physics_world.get_mut_joint(joint_handle)
-            && let Some(joint) = joint.as_revolute_mut()
         {
-            if motor_enabled {
-                joint
-                    .set_motor_velocity(motor_target_velocity, 0.0)
-                    .set_motor_max_force(Real::MAX);
-            } else {
-                joint.set_motor_velocity(0.0, 0.0).set_motor_max_force(0.0);
-            }
+            joint.set_motor_model(JointAxis::AngX, MotorModel::AccelerationBased);
+            joint.set_motor_max_force(JointAxis::AngX, Real::MAX);
             if angular_limit_enabled {
-                joint.set_limits([angular_limit_lower, angular_limit_upper]);
-            }
-            if softness <= 0.0 {
-                joint.data.softness.natural_frequency = 1.0e6;
-                joint.data.softness.damping_ratio = 1.0;
+                joint.set_limits(JointAxis::AngX, [angular_limit_lower, angular_limit_upper]);
             } else {
-                // Convert softness to damping parameters
-                let softness_clamped = softness.clamp(Real::EPSILON, 16.0);
-                joint.data.softness.natural_frequency = 10_f32.powf(3.0 - softness_clamped * 0.2);
-                joint.data.softness.damping_ratio = 10_f32.powf(-softness_clamped * 0.4375);
+                joint.limit_axes.remove(JointAxesMask::ANG_X);
+            }
+            if motor_enabled {
+                joint.set_motor(JointAxis::AngX, 0.0, motor_target_velocity, 0.0, 0.0);
+                #[cfg(feature = "dim3")]
+                joint.set_motor_max_force(JointAxis::AngX, motor_max_force);
+            } else if motor_position_enabled {
+                joint.set_motor(
+                    JointAxis::AngX,
+                    motor_target_position,
+                    0.0,
+                    motor_stiffness,
+                    motor_damping,
+                );
+            } else {
+                joint.motor_axes.remove(JointAxesMask::ANG_X);
+            }
+            if softness > 0.0 {
+                // Emulate softness by using ForceBased motor on LinX (coupled with LinY)
+                joint.locked_axes = JointAxesMask::FREE_FIXED_AXES;
+                joint.coupled_axes = JointAxesMask::LIN_AXES;
+                joint.set_motor_model(JointAxis::LinX, MotorModel::ForceBased);
+                joint.set_motor_max_force(JointAxis::LinX, Real::MAX);
+                // See Catto, Soft Constraints 2011 slides for CFM and ERP definitions
+                // softness = CFM / h, where h = time delta
+                // bias = ERP
+                // Catto 2011 shows CFM and ERP as they relate to k and c
+                // plug them in, rearrange, and you get the equations below to
+                // figure out k and c. Only works with a ForceBased spring.
+                let h: Real = physics_step;
+                let k: Real = bias / (h * h * softness);
+                let c: Real = (1.0 - bias) / (h * softness);
+                joint.set_motor(JointAxis::LinX, 0.0, 0.0, k, c);
+            } else {
+                joint.locked_axes = JointAxesMask::LIN_AXES;
+                joint.coupled_axes = JointAxesMask::FREE_FIXED_AXES;
+                joint.motor_axes.remove(JointAxesMask::LIN_X);
             }
         }
     }
@@ -350,19 +409,19 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        axis: Vector<Real>,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
-        limits: Vector<Real>,
+        axis: Vector,
+        anchor_1: Vector,
+        anchor_2: Vector,
+        limits: Vector,
         joint_type: RapierJointType,
         disable_collision: bool,
     ) -> JointHandle {
         self.body_wake_up(world_handle, body_handle_1, false);
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
-            let joint = PinSlotJointBuilder::new(UnitVector::new_unchecked(axis))
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
+            let joint = PinSlotJointBuilder::new(axis)
+                .local_anchor1(anchor_1)
+                .local_anchor2(anchor_2)
                 .limits([limits.x, limits.y])
                 .contacts_enabled(!disable_collision);
             return physics_world.insert_joint(body_handle_1, body_handle_2, joint_type, joint);
@@ -377,8 +436,8 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
         stiffness: Real,
         damping: Real,
         rest_length: Real,
@@ -392,8 +451,8 @@ impl PhysicsEngine {
                 Self::godot_spring_to_rapier_accel(stiffness, damping);
             let joint = SpringJointBuilder::new(rest_length, rapier_stiffness, rapier_damping)
                 .spring_model(MotorModel::AccelerationBased)
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
+                .local_anchor1(anchor_1)
+                .local_anchor2(anchor_2)
                 .contacts_enabled(!disable_collision);
             return physics_world.insert_joint(body_handle_1, body_handle_2, joint_type, joint);
         }
@@ -495,25 +554,36 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
-        axis_1: Rotation<Real>,
-        axis_2: Rotation<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
+        axis_1: Rotation,
+        axis_2: Rotation,
         joint_type: RapierJointType,
         disable_collision: bool,
     ) -> JointHandle {
         self.body_wake_up(world_handle, body_handle_1, false);
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
-            // Create a generic joint that allows all 6 degrees of freedom
-            // Extract the X axis from the rotation as UnitVector
-            let axis1_vec = axis_1 * Vector::x_axis();
-            let axis2_vec = axis_2 * Vector::x_axis();
+            // NOTE: 6DOF Angle limits may not behave as expected or be
+            // unstable when there is more than one angular DOF.
+            //
+            // Jolt seems to use a swing twist constraint for it's 6DOF which
+            // improves the situation by eliminating path dependence problems.
+            // If Rapier could add a pyramid like constraint to it's coupled angular
+            // axes then we could match what Jolt is doing.
+            // As of Rapier 0.32.0, I don't believe we can match jolt's limit behavior.
+            //
+            // For now, if a user needs high angular DOF's with limits, they
+            // can construct a compound joint out of multiple low DOF joints
+            // with dummy rigid bodies between them.
+            //
+            // They could also use hidden colliders as a constraint, instead of joint limits
+            //
+            let pose_1 = Pose::from_parts(anchor_1, axis_1);
+            let pose_2 = Pose::from_parts(anchor_2, axis_2);
             let joint = GenericJointBuilder::new(JointAxesMask::FREE_FIXED_AXES)
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
-                .local_axis1(axis1_vec)
-                .local_axis2(axis2_vec)
+                .local_frame1(pose_1)
+                .local_frame2(pose_2)
                 .contacts_enabled(!disable_collision);
             return physics_world.insert_joint(body_handle_1, body_handle_2, joint_type, joint);
         }
@@ -527,10 +597,10 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         body_handle_1: RigidBodyHandle,
         body_handle_2: RigidBodyHandle,
-        anchor_1: Vector<Real>,
-        anchor_2: Vector<Real>,
-        axis_1: Rotation<Real>,
-        axis_2: Rotation<Real>,
+        anchor_1: Vector,
+        anchor_2: Vector,
+        axis_1: Rotation,
+        axis_2: Rotation,
         swing_span: Real,
         twist_span: Real,
         joint_type: RapierJointType,
@@ -539,22 +609,24 @@ impl PhysicsEngine {
         self.body_wake_up(world_handle, body_handle_1, false);
         self.body_wake_up(world_handle, body_handle_2, false);
         if let Some(physics_world) = self.get_mut_world(world_handle) {
-            // Approximate cone: limit swing on X and Y to create a "box" that fits inside the cone
-            // Use swing_span / sqrt(2) to get the per-axis limit
-            let swing_limit = swing_span / 2.0f32.sqrt();
-            let twist_limit = twist_span / 2.0;
-            // Extract the X axis from the rotation as UnitVector
-            let axis1_vec = axis_1 * Vector::x_axis();
-            let axis2_vec = axis_2 * Vector::x_axis();
-            // Create a generic joint with locked translations and limited rotations
+            // A common use for this joint seems to be a shoulder for rag dolls.
+            // The arm held out to a middle position might represent the x axis (twist)
+            // The y and z rotation limits offer a kind of cone around that axis
+            // for the arm to move in (swing)
+            //
+            // Rapier's coupled_axes feature makes the whole joint work as intended
+            //
+            // Note that Godot Docs and the widget that Godot draws (as of 4.6.2)
+            // do not match what Jolt and the default engine are doing.
+            let pose_1 = Pose::from_parts(anchor_1, axis_1);
+            let pose_2 = Pose::from_parts(anchor_2, axis_2);
             let joint = GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
-                .local_anchor1(Point { coords: anchor_1 })
-                .local_anchor2(Point { coords: anchor_2 })
-                .local_axis1(axis1_vec)
-                .local_axis2(axis2_vec)
-                .limits(JointAxis::AngX, [-swing_limit, swing_limit])
-                .limits(JointAxis::AngY, [-swing_limit, swing_limit])
-                .limits(JointAxis::AngZ, [-twist_limit, twist_limit])
+                .local_frame1(pose_1)
+                .local_frame2(pose_2)
+                .coupled_axes(JointAxesMask::ANG_Y | JointAxesMask::ANG_Z)
+                .limits(JointAxis::AngX, [-twist_span, twist_span])
+                .limits(JointAxis::AngY, [-swing_span, swing_span])
+                .limits(JointAxis::AngZ, [-swing_span, swing_span])
                 .contacts_enabled(!disable_collision);
             return physics_world.insert_joint(body_handle_1, body_handle_2, joint_type, joint);
         }
@@ -573,15 +645,12 @@ impl PhysicsEngine {
         if let Some(physics_world) = self.get_mut_world(world_handle)
             && let Some(joint) = physics_world.get_mut_joint(joint_handle)
         {
-            let swing_limit = swing_span / 2.0f32.sqrt();
-            let twist_limit = twist_span / 2.0;
-            joint.set_limits(JointAxis::AngX, [-swing_limit, swing_limit]);
-            joint.set_limits(JointAxis::AngY, [-swing_limit, swing_limit]);
-            joint.set_limits(JointAxis::AngZ, [-twist_limit, twist_limit]);
+            joint.set_limits(JointAxis::AngX, [-twist_span, twist_span]);
+            joint.set_limits(JointAxis::AngY, [-swing_span, swing_span]);
+            joint.set_limits(JointAxis::AngZ, [-swing_span, swing_span]);
         }
     }
 
-    //TODO: Remove motor_enabled and spring_enabled once we have guidance on how to implement this properly
     #[cfg(feature = "dim3")]
     #[allow(clippy::too_many_arguments)]
     pub fn joint_change_generic_6dof_axis_param(
@@ -598,33 +667,35 @@ impl PhysicsEngine {
         spring_damping: Real,
         spring_stiffness: Real,
         spring_equilibrium_point: Real,
+        enable_limit: bool,
     ) {
         self.joint_wake_up_connected_rigidbodies(world_handle, joint_handle);
         if let Some(physics_world) = self.get_mut_world(world_handle)
             && let Some(joint) = physics_world.get_mut_joint(joint_handle)
         {
-            if enable_motor && enable_spring {
-                godot::global::godot_warn!(
-                    "Both spring and motor model are enabled on joint, this is currently not implemented, motor will be given precidence!"
-                );
+            // motor velocity should override motor position settings to match
+            // how Jolt behaves.
+            if enable_limit {
+                joint.set_limits(axis, [lower_limit, limit_upper]);
+            } else {
+                joint.limit_axes.remove(JointAxesMask::from(axis));
             }
-            joint.set_limits(axis, [lower_limit, limit_upper]);
             if enable_motor {
                 joint.set_motor_model(axis, MotorModel::ForceBased);
                 joint.set_motor_max_force(axis, motor_force_limit);
-                //TODO: where do we want to get the damping factor from: Higher in this case means the target velocity is approched more aggresively
-                joint.set_motor_velocity(axis, motor_target_velocity, 10.0);
+                joint.set_motor(axis, 0.0, motor_target_velocity, 0.0, 0.0);
             } else if enable_spring {
                 joint.set_motor_model(axis, MotorModel::AccelerationBased);
-                joint.set_motor_position(
+                joint.set_motor(
                     axis,
                     spring_equilibrium_point,
+                    0.0,
                     spring_stiffness,
                     spring_damping,
                 );
+                joint.set_motor_max_force(axis, Real::MAX);
             } else {
-                joint.set_motor_max_force(axis, 0.0);
-                joint.set_motor(axis, 0.0, 0.0, 0.0, 0.0);
+                joint.motor_axes.remove(JointAxesMask::from(axis));
             }
         }
     }

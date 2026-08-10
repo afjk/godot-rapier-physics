@@ -2,8 +2,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use godot::classes::*;
-use godot::global::*;
 use godot::prelude::*;
+use godot::register::info::PropertyHint;
 use rapier::dynamics::IntegrationParameters;
 use rapier::math::Real;
 #[cfg(feature = "parallel")]
@@ -25,6 +25,8 @@ const SOLVER_PREDICTIVE_CONTACT_ALLOWANCE_THRESHOLD: &str =
     "physics/rapier/solver/predictive_contact_allowance_threshold";
 const CONTACT_DAMPING_RATIO: &str = "physics/rapier/solver/contact_damping_ratio";
 const CONTACT_NATURAL_FREQUENCY: &str = "physics/rapier/solver/contact_natural_frequency";
+const DEFAULT_MAX_CCD_SUBSTEPS: i32 = 2;
+static APPLYING_PRESET: AtomicBool = AtomicBool::new(false);
 // Stability preset constants
 const STABILITY_PGS_ITERATIONS: i64 = 4;
 const STABILITY_STABILIZATION_ITERATIONS: i64 = 4;
@@ -53,13 +55,13 @@ const LENGTH_UNIT_HINT: &str = "1,100,1,suffix:length_unit,or_greater";
 #[cfg(feature = "dim2")]
 const FLUID_PARTICLE_VALUE: real = 20.0;
 #[cfg(feature = "dim3")]
-const FLUID_PARTICLE_VALUE: real = 0.5;
+const FLUID_PARTICLE_VALUE: real = 0.2;
 #[cfg(feature = "dim3")]
 const LENGTH_UNIT: &str = "physics/rapier/solver/length_unit_3d";
 #[cfg(feature = "dim3")]
 const LENGTH_UNIT_VALUE: real = 1.0;
 #[cfg(feature = "dim3")]
-const LENGTH_UNIT_HINT: &str = "0,1,0.0001,suffix:length_unit,or_greater";
+const LENGTH_UNIT_HINT: &str = "0.0001,1,0.0001,suffix:length_unit,or_greater";
 pub fn register_setting(
     p_name: &str,
     p_value: Variant,
@@ -157,7 +159,7 @@ impl RapierProjectSettings {
         );
         register_setting_ranged(
             SOLVER_MAX_CCD_SUBSTEPS,
-            Variant::from(integration_parameters.max_ccd_substeps as i32),
+            Variant::from(DEFAULT_MAX_CCD_SUBSTEPS),
             "0,16,or_greater",
             false,
         );
@@ -206,13 +208,13 @@ impl RapierProjectSettings {
         register_setting_ranged(
             FLUID_PARTICLE_RADIUS,
             Variant::from(FLUID_PARTICLE_VALUE),
-            "0,100,0.00001,or_greater",
+            "0.00001,100,0.00001,or_greater",
             true,
         );
         register_setting_ranged(
             FLUID_SMOOTHING_FACTOR,
             Variant::from(2.0),
-            "0,10,0.00001,suffix:%,or_greater",
+            "0.00001,10,0.00001,suffix:%,or_greater",
             false,
         );
         register_setting_ranged(
@@ -234,7 +236,6 @@ impl RapierProjectSettings {
             signals.settings_changed().connect(|| {
                 static LAST_PRESET_VALUE: std::sync::Mutex<Option<i64>> =
                     std::sync::Mutex::new(None);
-                static APPLYING_PRESET: AtomicBool = AtomicBool::new(false);
                 let current_preset = RapierProjectSettings::get_setting_int(SOLVER_PRESET);
                 let mut last_preset_value = LAST_PRESET_VALUE.lock().unwrap();
                 if let Some(last) = *last_preset_value {
@@ -324,7 +325,6 @@ impl RapierProjectSettings {
             return; // Don't apply when Custom
         }
         // Set flag to prevent detection during application
-        static APPLYING_PRESET: AtomicBool = AtomicBool::new(false);
         APPLYING_PRESET.store(true, Ordering::Release);
         let mut project_settings = ProjectSettings::singleton();
         match preset {
@@ -375,23 +375,25 @@ impl RapierProjectSettings {
     }
 
     pub fn get_solver_max_ccd_substeps() -> i64 {
-        RapierProjectSettings::get_setting_int(SOLVER_MAX_CCD_SUBSTEPS)
+        RapierProjectSettings::get_setting_int(SOLVER_MAX_CCD_SUBSTEPS).max(0)
     }
 
     pub fn get_solver_num_solver_iterations() -> i64 {
-        RapierProjectSettings::get_setting_int(SOLVER_NUM_ITERATIONS)
+        RapierProjectSettings::get_setting_int(SOLVER_NUM_ITERATIONS).max(1)
     }
 
     pub fn get_solver_num_internal_pgs_iterations() -> i64 {
-        RapierProjectSettings::get_setting_int(SOLVER_NUM_INTERNAL_PGS_ITERATIONS)
+        RapierProjectSettings::get_setting_int(SOLVER_NUM_INTERNAL_PGS_ITERATIONS).max(1)
     }
 
     pub fn get_fluid_particle_radius() -> Real {
-        RapierProjectSettings::get_setting_double(FLUID_PARTICLE_RADIUS) as Real
+        (RapierProjectSettings::get_setting_double(FLUID_PARTICLE_RADIUS) as Real)
+            .max(Real::EPSILON)
     }
 
     pub fn get_fluid_smoothing_factor() -> Real {
-        RapierProjectSettings::get_setting_double(FLUID_SMOOTHING_FACTOR) as Real
+        (RapierProjectSettings::get_setting_double(FLUID_SMOOTHING_FACTOR) as Real)
+            .max(Real::EPSILON)
     }
 
     pub fn get_fluid_boundary_coef() -> Real {
@@ -399,7 +401,7 @@ impl RapierProjectSettings {
     }
 
     pub fn get_length_unit() -> Real {
-        RapierProjectSettings::get_setting_double(LENGTH_UNIT) as Real
+        (RapierProjectSettings::get_setting_double(LENGTH_UNIT) as Real).max(Real::EPSILON)
     }
 
     pub fn get_normalized_allowed_linear_error() -> Real {
@@ -420,7 +422,7 @@ impl RapierProjectSettings {
     }
 
     pub fn get_num_internal_stabilization_iterations() -> i64 {
-        RapierProjectSettings::get_setting_int(SOLVER_NUM_INTERNAL_STABILIZATION_ITERATIONS)
+        RapierProjectSettings::get_setting_int(SOLVER_NUM_INTERNAL_STABILIZATION_ITERATIONS).max(1)
     }
 
     pub fn get_contact_damping_ratio() -> Real {
@@ -437,6 +439,6 @@ impl RapierProjectSettings {
 
     #[cfg(feature = "parallel")]
     pub fn get_num_threads() -> usize {
-        RapierProjectSettings::get_setting_int(NUM_THREADS) as usize
+        RapierProjectSettings::get_setting_int(NUM_THREADS).max(1) as usize
     }
 }

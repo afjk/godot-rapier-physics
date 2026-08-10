@@ -44,14 +44,38 @@ extends HingeJoint3D
 @export_range(0.0, 100.0, 0.01) var ik_damping: float = 1.0:
 	set(value):
 		ik_damping = value
-		if is_inside_tree():
-			_update_ik_options()
+		_update_ik_options()
 
 @export_range(1, 100, 1) var ik_max_iterations: int = 10:
 	set(value):
 		ik_max_iterations = value
-		if is_inside_tree():
-			_update_ik_options()
+		_update_ik_options()
+
+@export_group("Motor Position", "motor_")
+## Motor Position Targeting acts like a spring to pull the joint
+## back to the target angle
+@export_custom(PROPERTY_HINT_GROUP_ENABLE, "") var motor_position_enabled: bool = false:
+	set(value):
+		motor_position_enabled = value
+		_update_motor_position_options()
+
+@export_range(-180, 180, 0.1, "radians_as_degrees") var motor_target_angle: float = 0.0:
+	set(value):
+		motor_target_angle = value
+		_update_motor_position_options()
+
+@export var motor_stiffness: float = 0.0:
+	set(value):
+		motor_stiffness = value
+		_update_motor_position_options()
+
+@export var motor_damping: float = 0.0:
+	set(value):
+		motor_damping = value
+		_update_motor_position_options()
+
+@export_group("","")
+
 
 var _ik_constrained_axes: int = 7
 
@@ -62,7 +86,8 @@ func _init() -> void:
 func _ready() -> void:
 	_update_constrained_axes()
 	_update_ik_options()
-
+	_update_motor_position_options()
+	
 func _physics_process(delta: float) -> void:
 	_solve_ik_for_target()
 
@@ -81,6 +106,7 @@ func _update_ik_options() -> void:
 	
 	var joint_rid := get_rid()
 	if not joint_rid.is_valid():
+		push_error("Invalid joint rid")
 		return
 	
 	RapierPhysicsServer3D.joint_set_ik_options(
@@ -90,6 +116,28 @@ func _update_ik_options() -> void:
 		_ik_constrained_axes,
 		0.001,
 		0.001,
+	)
+
+func _update_motor_position_options() -> void:
+	if not is_inside_tree():
+		return
+	
+	var joint_rid := get_rid()
+	if not joint_rid.is_valid():
+		push_error("Invalid joint rid")
+		return
+
+	# workaround what seems like a rapier issue
+	# stiffness of 0.0 behaves strangely
+	# expected behaviour is for joint to hang freely
+	if is_zero_approx(motor_stiffness):
+		motor_stiffness = 0.00001	
+	RapierPhysicsServer3D.joint_set_motor_position_options(
+		joint_rid,
+		motor_target_angle,
+		motor_stiffness,
+		motor_damping,
+		motor_position_enabled,
 	)
 
 func _update_constrained_axes() -> void:

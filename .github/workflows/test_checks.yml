@@ -2,101 +2,115 @@ name: 🧪 Run Tests
 on:
   workflow_call:
 
+env:
+  GODOT_VERSION: '4.6.3-stable'
+
 jobs:
-  run-unit-tests-2d:
-    name: Run Unit Tests 2D
+  run-unit-tests:
+    name: Run Unit Tests ${{ matrix.dimensions.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dimensions:
+          - { name: 2D, feature: build2d }
+          - { name: 3D, feature: build3d }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup Godot
         uses: appsinacup/setup-godot-action@main
         with:
-          version: '4.5-stable'
+          version: ${{ env.GODOT_VERSION }}
 
-      - name: Run Unit Tests for 2D Build
-        shell: sh
+      - name: Run Unit Tests
+        shell: bash
         run: |
-          cargo test --all-targets --features="build2d,test" --no-default-features
-  run-unit-tests-3d:
-    name: Run Unit Tests 3D
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Godot
-        uses: appsinacup/setup-godot-action@main
-        with:
-          version: '4.5-stable'
+          cargo test --all-targets --features="${{ matrix.dimensions.feature }},test" --no-default-features
 
-      - name: Run Unit Tests for 3D Build
-        shell: sh
-        run: |
-          cargo test --all-targets --features="build3d,test" --no-default-features
-  run-scenesync-parity-3d:
-    name: Run SceneSync Rapier 0.30 Parity Tests
-    runs-on: ubuntu-latest
+  run-integration-tests:
+    name: Run Godot Tests ${{ matrix.dimensions.name }} (${{ matrix.os.name }})
+    runs-on: ${{ matrix.os.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { name: Linux, runner: ubuntu-latest }
+          - { name: macOS, runner: macos-26 }
+          - { name: Windows, runner: windows-latest }
+        dimensions:
+          - { name: 2D, short: 2d, feature: build2d }
+          - { name: 3D, short: 3d, feature: build3d }
     steps:
-      - uses: actions/checkout@v4
-      - name: Run SceneSync parity fixtures
-        shell: sh
-        run: |
-          cargo test --locked --no-default-features \
-            --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity" \
-            --lib scenesync_parity
-  run-integration-tests-2d:
-    name: Run Integration Tests 2D
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Godot
         uses: appsinacup/setup-godot-action@main
         with:
-          version: '4.5-stable'
-      - name: Run Integration Tests for 2D Build
-        if: false
-        shell: sh
+          version: ${{ env.GODOT_VERSION }}
+
+      - name: Build Extension
+        shell: bash
         run: |
-          ./scripts/build-dev-2d.sh
-          ls bin2d/addons/godot-rapier2d/bin
-          godot --headless --path ./bin2d test.tscn --quit-after 1000 > output.log 2>&1
-          echo "---------------------"
-          grep "ERROR:" output.log
-          echo "---------------------"
-          if grep -q "ERROR:" output.log; then
-            echo "Error found in output"
-            exit 1
-          elif grep -q "Success" output.log; then
-            echo "Test completed successfully"
-          else
-            echo "No success message found"
+          set -euo pipefail
+          cargo build --features="${{ matrix.dimensions.feature }},test" --no-default-features
+
+          addon_dir="bin${{ matrix.dimensions.short }}/addons/godot-rapier${{ matrix.dimensions.short }}/bin"
+          case "$RUNNER_OS" in
+            Linux)
+              cp target/debug/libgodot_rapier.so "$addon_dir/libgodot_rapier.linux.x86_64-unknown-linux-gnu.so"
+              ;;
+            macOS)
+              dylib="$addon_dir/libgodot_rapier.macos.framework/libgodot_rapier.macos.dylib"
+              cp target/debug/libgodot_rapier.dylib "$dylib"
+              codesign --force --sign - "$dylib"
+              ;;
+            Windows)
+              cp target/debug/godot_rapier.dll "$addon_dir/libgodot_rapier.windows.x86_64-pc-windows-msvc.dll"
+              ;;
+            *)
+              echo "Unsupported runner OS: $RUNNER_OS"
+              exit 1
+              ;;
+          esac
+
+      - name: Run Godot Test Suite
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          "$GODOT4" --headless --path ./bin${{ matrix.dimensions.short }} --import 2>&1 | tee godot-import-${{ matrix.dimensions.short }}.log
+          import_status=${PIPESTATUS[0]}
+          if [ "$import_status" -ne 0 ]; then
+            echo "Godot ${{ matrix.dimensions.name }} import failed with status ${import_status}"
+            exit "$import_status"
+          fi
+
+          "$GODOT4" --headless --path ./bin${{ matrix.dimensions.short }} start.tscn 2>&1 | tee godot-tests-${{ matrix.dimensions.short }}.log
+          godot_status=${PIPESTATUS[0]}
+          set -e
+
+          if grep -q "STATUS: FAILED" godot-tests-${{ matrix.dimensions.short }}.log; then
+            echo "Godot ${{ matrix.dimensions.name }} tests failed"
             exit 1
           fi
 
-  run-integration-tests-3d:
-    name: Run Integration Tests 3D
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Godot
-        uses: appsinacup/setup-godot-action@main
-        with:
-          version: '4.5-stable'
-      - name: Run Integration Tests for 3D Build
-        if: false
-        shell: sh
-        run: |
-          ./scripts/build-dev-3d.sh
-          ls bin3d/addons/godot-rapier3d/bin
-          godot --headless --path ./bin3d test.tscn --quit-after 1000 > output.log 2>&1
-          echo "---------------------"
-          grep "ERROR:" output.log
-          echo "---------------------"
-          if grep -q "ERROR:" output.log; then
-            echo "Error found in output"
-            exit 1
-          elif grep -q "Success" output.log; then
-            echo "Test completed successfully"
-          else
-            echo "No success message found"
+          if ! grep -q "STATUS: SUCCESS" godot-tests-${{ matrix.dimensions.short }}.log; then
+            echo "Godot ${{ matrix.dimensions.name }} tests did not finish successfully"
             exit 1
           fi
+
+          if [ "$godot_status" -ne 0 ]; then
+            echo "Godot exited with status ${godot_status}"
+            exit "$godot_status"
+          fi
+
+      - name: Upload Godot Test Log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: godot-tests-${{ matrix.dimensions.short }}-${{ matrix.os.name }}-log
+          path: |
+            godot-import-${{ matrix.dimensions.short }}.log
+            godot-tests-${{ matrix.dimensions.short }}.log
+          if-no-files-found: error

@@ -8,6 +8,7 @@ use physics_server_3d::*;
 use crate::bodies::rapier_collision_object::IRapierCollisionObject;
 use crate::servers::rapier_physics_singleton::get_id_rid;
 use crate::servers::rapier_physics_singleton::physics_data;
+use crate::spaces::rapier_space::RapierSpace;
 use crate::types::*;
 pub struct RapierDirectBodyStateImpl {
     body: Rid,
@@ -480,7 +481,12 @@ impl RapierDirectBodyStateImpl {
             && let Some(body) = body.get_body()
             && let Some(contact) = body.contacts().get(contact_idx as usize)
         {
-            return contact.collider_instance_id;
+            let rapier_id = contact.collider_instance_id;
+            if let Some(rid) = physics_data.ids.get(&rapier_id)
+                && let Some(collider_obj) = physics_data.collision_objects.get(rid)
+            {
+                return collider_obj.get_base().get_instance_id();
+            }
         }
         0
     }
@@ -491,11 +497,15 @@ impl RapierDirectBodyStateImpl {
             && let Some(body) = body.get_body()
             && let Some(contact) = body.contacts().get(contact_idx as usize)
         {
-            match Gd::try_from_instance_id(InstanceId::from_i64(
-                contact.collider_instance_id as i64,
-            )) {
-                Ok(object) => return Some(object),
-                Err(_) => return None,
+            let rapier_id = contact.collider_instance_id;
+            if let Some(rid) = physics_data.ids.get(&rapier_id)
+                && let Some(collider_obj) = physics_data.collision_objects.get(rid)
+            {
+                let instance_id = collider_obj.get_base().get_instance_id();
+                match Gd::try_from_instance_id(InstanceId::from_i64(instance_id as i64)) {
+                    Ok(object) => return Some(object),
+                    Err(_) => return None,
+                }
             }
         }
         None
@@ -535,6 +545,14 @@ impl RapierDirectBodyStateImpl {
     }
 
     pub(super) fn integrate_forces(&mut self) {
+        let step = RapierSpace::get_last_step();
+        let mut linear_velocity = self.get_linear_velocity();
+        linear_velocity += self.get_total_gravity() * step;
+        linear_velocity *= (1.0 - step * self.get_total_linear_damp()).max(0.0);
+        let mut angular_velocity = self.get_angular_velocity();
+        angular_velocity *= (1.0 - step * self.get_total_angular_damp()).max(0.0);
+        self.set_linear_velocity(linear_velocity);
+        self.set_angular_velocity(angular_velocity);
         let physics_data = physics_data();
         if let Some(body) = physics_data.collision_objects.get_mut(&self.body)
             && let Some(body) = body.get_mut_body()

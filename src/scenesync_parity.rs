@@ -506,7 +506,7 @@ impl SceneSyncRapierWorld3D {
         let Some(state) = self.world.body_state(&stable_id.to_string()) else {
             return result;
         };
-        result.set("id", stable_id);
+        result.set("id", &stable_id.to_variant());
         result.set("fixed", state.fixed);
         result.set(
             "position",

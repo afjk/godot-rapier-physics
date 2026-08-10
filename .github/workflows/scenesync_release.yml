@@ -19,8 +19,9 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
-  SCENESYNC_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity,api-custom
-  SCENESYNC_TEST_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity
+  SCENESYNC_FEATURES: single-dim3,serde-serialize,scenesync-parity
+  SCENESYNC_TEST_FEATURES: single-dim3,serde-serialize,scenesync-parity,api-4-6
+  SCENESYNC_API_FEATURE: api-4-6
 
 jobs:
   fixture-hashes:
@@ -71,13 +72,6 @@ jobs:
             target: aarch64-linux-android
     steps:
       - uses: actions/checkout@v4
-      - name: Setup compatible Godot extension API
-        uses: appsinacup/setup-godot-action@main
-        with:
-          # godot-rust 0.4.5 cannot generate bindings from the 4.6.3 API.
-          # The 4.5 GDExtension API is forward-compatible with Godot 4.6;
-          # the addon descriptor keeps compatibility_minimum = 4.6.
-          version: 4.5-stable
       - name: Install Linux build dependencies
         if: matrix.name == 'linux-x86_64'
         shell: bash
@@ -108,6 +102,7 @@ jobs:
         with:
           arch: ${{ matrix.target }}
           features: ${{ env.SCENESYNC_FEATURES }}
+          api_feature: ${{ env.SCENESYNC_API_FEATURE }}
       - name: Stage platform binary
         shell: bash
         run: |
@@ -174,14 +169,14 @@ jobs:
           fi
           plugin_info="dist/combined/addons/godot-rapier3d/plugin.info.cfg"
           sed -i 's/flavour="<flavour>"/flavour="scenesync-parity"/' "${plugin_info}"
-          sed -i "s/version=\"0.8.28\"/version=\"${release_version}\"/" "${plugin_info}"
+          sed -i "s/version=\"0.8.35\"/version=\"${release_version}\"/" "${plugin_info}"
 
           build_info="dist/combined/addons/godot-rapier3d/SCENESYNC_BUILD.txt"
           {
             echo "version=${release_version}"
             echo "commit=${GITHUB_SHA}"
             echo "godot_runtime=4.6.3"
-            echo "godot_extension_api=4.5"
+            echo "godot_extension_api=4.6"
             echo "rapier=0.30.0"
             echo "features=${SCENESYNC_FEATURES}"
             echo "platforms=linux-x86_64,windows-x86_64,macos-universal,android-arm64"

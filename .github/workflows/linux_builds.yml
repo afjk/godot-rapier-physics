@@ -12,14 +12,14 @@ jobs:
         arch: ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "armv7-unknown-linux-gnueabihf", "i686-unknown-linux-gnu"]
         precision: [single] #, double]
         dimensions: [{"feature": "dim2", "short": "2d"}, {"feature": "dim3", "short": "3d"}]
-        features: [{"feature":"simd-nightly,serde-serialize,parallel", "name": "simd-parallel"}, {"feature":"enhanced-determinism,serde-serialize", "name": "enhanced-determinism"}]
+        features: [{"feature":"simd-stable,serde-serialize,parallel,experimental-threads,register-docs", "name": "simd-parallel"}, {"feature":"enhanced-determinism,serde-serialize,experimental-threads,register-docs", "name": "enhanced-determinism"}]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup Godot
         uses: appsinacup/setup-godot-action@main
         with:
-          version: '4.5-stable'
+          version: '4.6-stable'
       - name: "Install dependencies"
         shell: sh
         run: |
@@ -47,14 +47,14 @@ jobs:
           mv target/release/libgodot_rapier.so bin${{ matrix.dimensions.short }}/addons/godot-rapier${{ matrix.dimensions.short }}/bin/libgodot_rapier.linux.${{ matrix.arch }}.so
           mv target/release/libgodot_rapier.a bin${{ matrix.dimensions.short }}/addons/godot-rapier${{ matrix.dimensions.short }}/bin/libgodot_rapier.linux.${{ matrix.arch }}.a
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: godot-rapier-${{ matrix.dimensions.short }}-${{ matrix.precision }}-${{ matrix.features.name }}-${{ matrix.arch}}
           path: |
             bin${{ matrix.dimensions.short }}/**/*.so
           if-no-files-found: error
       - name: Upload Static
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: static-rapier-${{ matrix.dimensions.short }}-${{ matrix.precision }}-${{ matrix.features.name }}-${{ matrix.arch}}
           path: |

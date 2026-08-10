@@ -155,19 +155,23 @@ impl RapierGeneric6DOFJoint3D {
             return;
         }
         if is_angular {
+            // angles are being inverted to make rapier behavoiur match Jolt
+            // A quick look at the Jolt source code, and it is also inverting angles,
+            // presumably to match a peculiarity of Godot Physics.
             physics_engine.joint_change_generic_6dof_axis_param(
                 self.base.get_space_id(),
                 self.base.get_handle(),
                 rapier_axis,
-                axis_params.angular_lower_limit,
-                axis_params.angular_upper_limit,
+                -axis_params.angular_upper_limit,
+                -axis_params.angular_lower_limit,
                 axis_params.enable_angular_motor,
-                axis_params.angular_motor_target_velocity,
+                -axis_params.angular_motor_target_velocity,
                 axis_params.angular_motor_force_limit,
                 axis_params.enable_angular_spring,
                 axis_params.angular_spring_damping,
                 axis_params.angular_spring_stiffness,
-                axis_params.angular_spring_equilibrium_point,
+                -axis_params.angular_spring_equilibrium_point,
+                axis_params.enable_angular_limit,
             );
         } else {
             physics_engine.joint_change_generic_6dof_axis_param(
@@ -183,6 +187,7 @@ impl RapierGeneric6DOFJoint3D {
                 axis_params.linear_spring_damping,
                 axis_params.linear_spring_stiffness,
                 axis_params.linear_spring_equilibrium_point,
+                axis_params.enable_linear_limit,
             );
         }
     }

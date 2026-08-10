@@ -255,12 +255,8 @@ impl RapierCollisionObjectBase {
         let scale = transform_scale(&self.state.transform);
         let mut shape_info = shape_info_from_body_shape(shape.id, shape.xform);
         shape_info.scale = vector_to_rapier(vector_to_godot(shape_info.scale) * scale);
-        let position = shape_info
-            .transform
-            .translation
-            .vector
-            .component_mul(&vector_to_rapier(scale));
-        shape_info.transform.translation.vector = position;
+        let position = shape_info.transform.translation * vector_to_rapier(scale);
+        shape_info.transform.translation = position;
         physics_engine.collider_set_transform(
             self.state.space_id,
             shape.collider_handle,
@@ -549,6 +545,10 @@ impl RapierCollisionObjectBase {
 
     pub fn set_pickable(&mut self, p_pickable: bool) {
         self.pickable = p_pickable;
+    }
+
+    pub fn get_pickable(&self) -> bool {
+        self.pickable
     }
 
     pub fn destroy_body(&mut self, physics_engine: &mut PhysicsEngine) {

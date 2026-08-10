@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.8.35
+
+## What's Changed
+
+- Fix 2D cross platform determinism by @RaphaelLEMAS in https://github.com/appsinacup/godot-rapier-physics/pull/559
+
+## v0.8.34
+
+## What's Changed
+- Fix PinJoint2D softness to match Godot by @Schnorg in https://github.com/appsinacup/godot-rapier-physics/pull/555
+- fix state manager cache state crash on Mac ARM by @RaphaelLEMAS in https://github.com/appsinacup/godot-rapier-physics/pull/557
+
+
+**Full Changelog**: https://github.com/appsinacup/godot-rapier-physics/compare/v0.8.33...v0.8.34
+
+## v0.8.33
+
+## What's Changed
+* update to godot rust 0.5.3 by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/537
+* implement get closest point. Use project_point by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/542
+* change from ColliderHandle to (other_collider, this_area_collider) by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/544
+* fix for leak by using for class static by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/552
+* Fix 2D contacts and shape cast queries by @Kyzzsa in https://github.com/appsinacup/godot-rapier-physics/pull/553
+* fix replace not overriding linear and angular damping and stationary character body by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/554
+
+## New Contributors
+* @Kyzzsa made their first contribution in https://github.com/appsinacup/godot-rapier-physics/pull/553
+
+## v0.8.32
+
+## What's Changed
+* fix freeze mode by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/527
+* Fix Issues with 3D Joints by @Schnorg in https://github.com/appsinacup/godot-rapier-physics/pull/528
+
+
+**Full Changelog**: https://github.com/appsinacup/godot-rapier-physics/compare/v0.8.31...v0.8.32
+
+## v0.8.31
+
+## What's Changed
+* Implement state integrate forces and fix space override by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/526
+
+
+**Full Changelog**: https://github.com/appsinacup/godot-rapier-physics/compare/v0.8.30...v0.8.31
+
+## v0.8.30 - May 8
+
+## What's Changed
+* Fix area2D monitorable preventing monitoring by @jauwnio in https://github.com/appsinacup/godot-rapier-physics/pull/515
+* Fix pickable inspector property having no function by @jauwnio in https://github.com/appsinacup/godot-rapier-physics/pull/517
+* Add motor position targeting and fix HingeJoint3D axis bug by @Schnorg in https://github.com/appsinacup/godot-rapier-physics/pull/520
+* Add experimental-threads to all by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/521
+* Fix Joint3D poses, 6DOF joint motor pos & limits by @Schnorg in https://github.com/appsinacup/godot-rapier-physics/pull/523
+* create polyglon using convex hull as fallback by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/522
+* dont error on stale removed event by @Ughuuu in https://github.com/appsinacup/godot-rapier-physics/pull/524
+
+## New Contributors
+* @jauwnio made their first contribution in https://github.com/appsinacup/godot-rapier-physics/pull/515
+* @Schnorg made their first contribution in https://github.com/appsinacup/godot-rapier-physics/pull/520
+
+**Full Changelog**: https://github.com/appsinacup/godot-rapier-physics/compare/v0.8.29...v0.8.30
+
+## v0.8.29 - Apr 15
+
+- Update to latest rapier and parry.
+
 ## v0.8.28 - Mar 27
 
 - Saved State Congruence by @dog-molecule in https://github.com/appsinacup/godot-rapier-physics/pull/499

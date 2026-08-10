@@ -19,6 +19,7 @@ use servers::rapier_physics_singleton::PhysicsShapes;
 use servers::rapier_physics_singleton::PhysicsSpaces;
 use servers::rapier_physics_singleton::RapierId;
 use servers::rapier_physics_singleton::get_id_rid;
+use servers::rapier_physics_singleton::physics_data;
 
 use super::exportable_object::ExportToImport;
 use super::exportable_object::ExportableObject;
@@ -59,6 +60,7 @@ pub struct EventReport {
     pub object_shape_index: u32,
     pub this_area_shape_index: u32,
 }
+type MonitorKey = (ColliderHandle, ColliderHandle);
 impl EventReport {
     pub fn from_monitor_info(from_info: MonitorInfo, state_in: i32) -> Self {
         Self {
@@ -69,6 +71,93 @@ impl EventReport {
             object_shape_index: from_info.last_entry_report.object_shape_index,
             this_area_shape_index: from_info.last_entry_report.this_area_shape_index,
         }
+    }
+
+    fn is_same_shape_pair(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.collision_object_type == other.collision_object_type
+            && self.object_shape_index == other.object_shape_index
+            && self.this_area_shape_index == other.this_area_shape_index
+    }
+}
+struct ProcessedMonitorEvent {
+    num_contacts: i32,
+    should_report: bool,
+}
+#[derive(Debug, PartialEq, Eq)]
+enum MonitorEventResult {
+    Contacts(i32),
+    StaleRemovedExit,
+    MissingExit,
+    InvalidState,
+}
+impl RapierAreaState {
+    fn monitor_key(
+        this_collider_handle: ColliderHandle,
+        other_collider_handle: ColliderHandle,
+    ) -> MonitorKey {
+        (other_collider_handle, this_collider_handle)
+    }
+
+    fn process_monitor_event(
+        &mut self,
+        this_collider_handle: ColliderHandle,
+        other_collider_handle: ColliderHandle,
+        event_report: &EventReport,
+        event_removed: bool,
+    ) -> MonitorEventResult {
+        let monitor_key = Self::monitor_key(this_collider_handle, other_collider_handle);
+        let current_monitor = self.monitored_objects.get_mut(&monitor_key);
+        match event_report.state {
+            -1 => {
+                if let Some(current_monitor) = current_monitor {
+                    current_monitor.num_contacts -= 1;
+                    let num_contacts = current_monitor.num_contacts;
+                    if num_contacts == 0 {
+                        self.monitored_objects.remove(&monitor_key);
+                    }
+                    MonitorEventResult::Contacts(num_contacts)
+                } else if event_removed {
+                    MonitorEventResult::StaleRemovedExit
+                } else {
+                    MonitorEventResult::MissingExit
+                }
+            }
+            1 => {
+                if let Some(current_monitor) = current_monitor {
+                    current_monitor.num_contacts += 1;
+                    MonitorEventResult::Contacts(current_monitor.num_contacts)
+                } else {
+                    let new_monitor_info = MonitorInfo {
+                        other_collider_id: event_report.id,
+                        last_entry_report: *event_report,
+                        num_contacts: 1,
+                    };
+                    self.monitored_objects.insert(monitor_key, new_monitor_info);
+                    MonitorEventResult::Contacts(1)
+                }
+            }
+            _ => MonitorEventResult::InvalidState,
+        }
+    }
+
+    fn find_opposite_unhandled_event_for_shape(
+        &self,
+        new_monitor_key: MonitorKey,
+        new_event: &EventReport,
+    ) -> Option<MonitorKey> {
+        self.unhandled_events
+            .iter()
+            .find_map(|(queued_monitor_key, queued_event)| {
+                if *queued_monitor_key != new_monitor_key
+                    && queued_event.state == -new_event.state
+                    && queued_event.is_same_shape_pair(new_event)
+                {
+                    Some(*queued_monitor_key)
+                } else {
+                    None
+                }
+            })
     }
 }
 pub enum AreaUpdateMode {
@@ -115,7 +204,8 @@ impl ImportToExport for AreaImport {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RapierAreaState {
     // New events go into this queue; once handled (eg once reported to Godot), they are removed. No need to serialize this, I think.
-    pub unhandled_events: HashMap<ColliderHandle, EventReport>,
+    #[cfg_attr(feature = "serde-serialize", serde(skip))]
+    pub unhandled_events: HashMap<MonitorKey, EventReport>,
     // This is a persistent list of all current contacts. Entries only disappear when contact ceases, or when contacts are manually cleared.
     #[cfg_attr(
         feature = "serde-serialize",
@@ -266,6 +356,7 @@ impl RapierArea {
     pub fn receive_event(
         &mut self,
         event_state: i32,
+        event_removed: bool,
         other_collider_type: CollisionObjectType,
         other_collider_handle: ColliderHandle,
         other_collider: &mut Option<&mut RapierCollisionObject>,
@@ -279,9 +370,7 @@ impl RapierArea {
         // If the other object is an area:
         if let Some(other_collider) = other_collider
             && let Some(other_area) = other_collider.get_mut_area()
-            && (self.area_monitor_callback.is_none()
-                || !self.is_monitorable()
-                || !other_area.is_monitorable())
+            && (self.area_monitor_callback.is_none() || !other_area.is_monitorable())
         {
             return;
         }
@@ -294,110 +383,88 @@ impl RapierArea {
             this_area_shape_index: this_shape as u32,
         };
         // Process the event, creating or destroying a monitor as necessary.
-        if let Some(num_contacts_in_monitor) = self.process_new_event(
+        if let Some(processed_event) = self.process_new_event(
             space,
             this_collider_handle,
             other_collider_handle,
             &event_report,
+            event_removed,
         ) {
             // If the other object is a body, we may have to register or unregister this area from the body:
             if let Some(other_collider) = other_collider
                 && let Some(other_body) = other_collider.get_mut_body()
             {
-                if num_contacts_in_monitor == 1 && event_state == 1 {
+                if processed_event.num_contacts == 1 && event_state == 1 {
                     // If we're adding this contact anew, register the area in the body:
                     other_body.add_area(self, space);
-                } else if num_contacts_in_monitor == 0 {
+                } else if processed_event.num_contacts == 0 {
                     // Else, if our monitor has no more contacts:
                     other_body.remove_area(self.base.get_id(), space);
                 }
             }
-            // If the processing method returned a value, then we want to pipe an event through to Godot.
-            self.enqueue_unhandled_event(space, other_collider_handle, event_report);
+            if processed_event.should_report {
+                let monitor_key =
+                    RapierAreaState::monitor_key(this_collider_handle, other_collider_handle);
+                self.enqueue_unhandled_event(space, monitor_key, event_report);
+            }
         }
     }
 
     // Returns the number of contacts remaining in our monitor for the other collider.
     // If it returns zero, then the monitor has been removed and the collider is exiting.
-    // If it returns None, then we don't have an event worth reporting to Godot.
+    // If it returns None, then the event was invalid or stale enough to ignore completely.
     fn process_new_event(
         &mut self,
         space: &mut RapierSpace,
         this_collider_handle: ColliderHandle,
         other_collider_handle: ColliderHandle,
         entry_report: &EventReport,
-    ) -> Option<i32> {
-        let current_monitor = self
-            .state
-            .monitored_objects
-            .get_mut(&(other_collider_handle, this_collider_handle));
-        let num_contacts: Option<i32>;
-        match entry_report.state {
-            // Exit event:
-            -1 => {
-                if let Some(current_monitor) = current_monitor {
-                    current_monitor.num_contacts -= 1;
-                    num_contacts = Some(current_monitor.num_contacts);
-                    if current_monitor.num_contacts == 0 {
-                        // If we're no longer contacting any shapes from this area:
-                        self.state
-                            .monitored_objects
-                            .remove(&(other_collider_handle, this_collider_handle));
-                    }
-                } else {
-                    // If we don't have a current monitor, then we don't want to send an exit event.
-                    // To my knowledge, this should never happen.
+        event_removed: bool,
+    ) -> Option<ProcessedMonitorEvent> {
+        let monitor_key = RapierAreaState::monitor_key(this_collider_handle, other_collider_handle);
+        let num_contacts = match self.state.process_monitor_event(
+            this_collider_handle,
+            other_collider_handle,
+            entry_report,
+            event_removed,
+        ) {
+            MonitorEventResult::Contacts(num_contacts) => num_contacts,
+            MonitorEventResult::StaleRemovedExit => {
+                self.filter_on_unhandled_events(space, monitor_key, entry_report);
+                return None;
+            }
+            MonitorEventResult::MissingExit => {
+                let should_report_exit =
+                    self.filter_on_unhandled_events(space, monitor_key, entry_report);
+                if should_report_exit {
                     godot_warn!(
                         "Area has received an Exit Event for a collider with no recorded Entry Event."
                     );
-                    return None;
                 }
+                return None;
             }
-            // Entry event:
-            1 => {
-                // Do we have a monitor for this body?
-                if let Some(current_monitor) = current_monitor {
-                    current_monitor.num_contacts += 1;
-                    num_contacts = Some(current_monitor.num_contacts);
-                } else {
-                    // Otherwise, this is a totally new contact. Start a new contact monitor; the event will need to be sent to Godot.
-                    let new_monitor_info = MonitorInfo {
-                        other_collider_id: entry_report.id,
-                        last_entry_report: *entry_report,
-                        num_contacts: 1,
-                    };
-                    self.state.monitored_objects.insert(
-                        (other_collider_handle, this_collider_handle),
-                        new_monitor_info,
-                    );
-                    num_contacts = Some(1);
-                }
-            }
-            _ => {
+            MonitorEventResult::InvalidState => {
                 godot_error!("Event has an invalid state!");
                 return None;
             }
-        }
+        };
         // Edge case to handle the scenario where an object has entered and is now exiting this area in the same frame.
         // As we flush queries every frame, the only way our unhandled event queue will have an entry is if this event occured this frame.
-        if self.filter_on_unhandled_events(space, other_collider_handle, entry_report.state) {
-            num_contacts
-        } else {
-            // We don't want to pass any events through to Godot.
-            None
-        }
+        let should_report = self.filter_on_unhandled_events(space, monitor_key, entry_report);
+        Some(ProcessedMonitorEvent {
+            num_contacts,
+            should_report,
+        })
     }
 
     // Add an entry event to our queue.
     fn enqueue_unhandled_event(
         &mut self,
         space: &mut RapierSpace,
-        other_collider_handle: ColliderHandle,
+        monitor_key: MonitorKey,
         new_event: EventReport,
     ) {
-        self.state
-            .unhandled_events
-            .insert(other_collider_handle, new_event);
+        self.state.unhandled_events.insert(monitor_key, new_event);
         // Finally, we tell the space that we have events in our queue.
         space
             .get_mut_state()
@@ -408,26 +475,36 @@ impl RapierArea {
     fn filter_on_unhandled_events(
         &mut self,
         space: &mut RapierSpace,
-        other_collider_handle: ColliderHandle,
-        new_event_state: i32,
+        monitor_key: MonitorKey,
+        new_event: &EventReport,
     ) -> bool {
-        if let Some(current_event_in_queue) =
-            self.state.unhandled_events.get(&other_collider_handle)
-        {
+        if let Some(current_event_in_queue) = self.state.unhandled_events.get(&monitor_key) {
             // See if we currently have a pending unhandled event (eg an event from this frame) that is the opposite of this one.
             // If so, this event will cancel that one out.
-            if current_event_in_queue.state == -new_event_state {
-                self.state.unhandled_events.remove(&other_collider_handle);
+            if current_event_in_queue.state == -new_event.state {
+                self.state.unhandled_events.remove(&monitor_key);
                 if self.state.unhandled_events.is_empty() {
                     space
                         .get_mut_state()
-                        .area_remove_from_area_update_list(self.base.get_id());
-                    return false;
+                        .area_remove_from_monitor_query_list(self.base.get_id());
                 }
-            } else if current_event_in_queue.state == new_event_state {
+                return false;
+            } else if current_event_in_queue.state == new_event.state {
                 // In this scenario, we can just stop here-- the state is already going to report an entry event at the end of this tick.
                 return false;
             }
+        }
+        if let Some(cancelled_monitor_key) = self
+            .state
+            .find_opposite_unhandled_event_for_shape(monitor_key, new_event)
+        {
+            self.state.unhandled_events.remove(&cancelled_monitor_key);
+            if self.state.unhandled_events.is_empty() {
+                space
+                    .get_mut_state()
+                    .area_remove_from_monitor_query_list(self.base.get_id());
+            }
+            return false;
         }
         true
     }
@@ -468,6 +545,16 @@ impl RapierArea {
         self.gravity_override_mode != AreaSpaceOverrideMode::DISABLED
             || self.linear_damping_override_mode != AreaSpaceOverrideMode::DISABLED
             || self.angular_damping_override_mode != AreaSpaceOverrideMode::DISABLED
+    }
+
+    fn queue_area_override_update(
+        physics_spaces: &mut PhysicsSpaces,
+        space_rid: &Rid,
+        area_id: RapierId,
+    ) {
+        if let Some(space) = physics_spaces.get_mut(space_rid) {
+            space.get_mut_state().area_add_to_area_update_list(area_id);
+        }
     }
 
     pub fn set_monitor_callback(
@@ -512,14 +599,20 @@ impl RapierArea {
         match p_param {
             AreaParameter::GRAVITY_OVERRIDE_MODE => {
                 let had_override = self.has_any_space_override();
-                self.gravity_override_mode =
+                let new_gravity_override_mode =
                     AreaSpaceOverrideMode::from_ord(p_value.try_to().unwrap_or_default());
-                let has_override = self.has_any_space_override();
-                if has_override != had_override {
+                if self.gravity_override_mode != new_gravity_override_mode {
+                    self.gravity_override_mode = new_gravity_override_mode;
+                    let has_override = self.has_any_space_override();
+                    if has_override != had_override {
+                        if has_override {
+                            return AreaUpdateMode::EnableSpaceOverride;
+                        } else {
+                            return AreaUpdateMode::DisableSpaceOverride;
+                        }
+                    }
                     if has_override {
-                        return AreaUpdateMode::EnableSpaceOverride;
-                    } else {
-                        return AreaUpdateMode::DisableSpaceOverride;
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -530,9 +623,7 @@ impl RapierArea {
                     self.gravity = new_gravity;
                     if self.gravity_override_mode != AreaSpaceOverrideMode::DISABLED {
                         // Update currently detected bodies
-                        if let Some(space) = physics_spaces.get_mut(&space_rid) {
-                            space.get_mut_state().area_add_to_area_update_list(id);
-                        }
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -542,11 +633,7 @@ impl RapierArea {
                     self.gravity_vector = new_gravity_vector;
                     if self.gravity_override_mode != AreaSpaceOverrideMode::DISABLED {
                         // Update currently detected bodies
-                        if let Some(space) =
-                            physics_spaces.get_mut(&self.base.get_space(physics_ids))
-                        {
-                            space.get_mut_state().area_add_to_area_update_list(id);
-                        }
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -556,9 +643,7 @@ impl RapierArea {
                     self.gravity_is_point = new_gravity_is_point;
                     if self.gravity_override_mode != AreaSpaceOverrideMode::DISABLED {
                         // Update currently detected bodies
-                        if let Some(space) = physics_spaces.get_mut(&space_rid) {
-                            space.get_mut_state().area_add_to_area_update_list(id);
-                        }
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -568,22 +653,26 @@ impl RapierArea {
                     self.gravity_point_unit_distance = new_gravity_point_unit_distance;
                     if self.gravity_override_mode != AreaSpaceOverrideMode::DISABLED {
                         // Update currently detected bodies
-                        if let Some(space) = physics_spaces.get_mut(&space_rid) {
-                            space.get_mut_state().area_add_to_area_update_list(id);
-                        }
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
             AreaParameter::LINEAR_DAMP_OVERRIDE_MODE => {
                 let had_override = self.has_any_space_override();
-                self.linear_damping_override_mode =
+                let new_linear_damping_override_mode =
                     AreaSpaceOverrideMode::from_ord(p_value.try_to().unwrap_or_default());
-                let has_override = self.has_any_space_override();
-                if has_override != had_override {
+                if self.linear_damping_override_mode != new_linear_damping_override_mode {
+                    self.linear_damping_override_mode = new_linear_damping_override_mode;
+                    let has_override = self.has_any_space_override();
+                    if has_override != had_override {
+                        if has_override {
+                            return AreaUpdateMode::EnableSpaceOverride;
+                        } else {
+                            return AreaUpdateMode::DisableSpaceOverride;
+                        }
+                    }
                     if has_override {
-                        return AreaUpdateMode::EnableSpaceOverride;
-                    } else {
-                        return AreaUpdateMode::DisableSpaceOverride;
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -593,22 +682,26 @@ impl RapierArea {
                     self.linear_damp = new_linear_damp;
                     if self.linear_damping_override_mode != AreaSpaceOverrideMode::DISABLED {
                         // Update currently detected bodies
-                        if let Some(space) = physics_spaces.get_mut(&space_rid) {
-                            space.get_mut_state().area_add_to_area_update_list(id);
-                        }
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
             AreaParameter::ANGULAR_DAMP_OVERRIDE_MODE => {
                 let had_override = self.has_any_space_override();
-                self.angular_damping_override_mode =
+                let new_angular_damping_override_mode =
                     AreaSpaceOverrideMode::from_ord(p_value.try_to().unwrap_or_default());
-                let has_override = self.has_any_space_override();
-                if has_override != had_override {
+                if self.angular_damping_override_mode != new_angular_damping_override_mode {
+                    self.angular_damping_override_mode = new_angular_damping_override_mode;
+                    let has_override = self.has_any_space_override();
+                    if has_override != had_override {
+                        if has_override {
+                            return AreaUpdateMode::EnableSpaceOverride;
+                        } else {
+                            return AreaUpdateMode::DisableSpaceOverride;
+                        }
+                    }
                     if has_override {
-                        return AreaUpdateMode::EnableSpaceOverride;
-                    } else {
-                        return AreaUpdateMode::DisableSpaceOverride;
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -618,9 +711,7 @@ impl RapierArea {
                     self.angular_damp = new_angular_damp;
                     if self.angular_damping_override_mode != AreaSpaceOverrideMode::DISABLED {
                         // Update currently detected bodies
-                        if let Some(space) = physics_spaces.get_mut(&space_rid) {
-                            space.get_mut_state().area_add_to_area_update_list(id);
-                        }
+                        Self::queue_area_override_update(physics_spaces, &space_rid, id);
                     }
                 }
             }
@@ -692,22 +783,32 @@ impl RapierArea {
     }
 
     pub fn call_queries(
-        unhandled_events: &HashMap<ColliderHandle, EventReport>,
+        unhandled_events: &HashMap<MonitorKey, EventReport>,
         monitor_callback: Option<Callable>,
         area_monitor_callback: Option<Callable>,
         physics_ids: &PhysicsIds,
     ) {
-        for (_, monitor_report) in unhandled_events {
+        let physics_data = physics_data();
+        for monitor_report in unhandled_events.values() {
             if monitor_report.state == 0 {
                 godot_error!("Invalid monitor state");
                 continue;
             }
             let rid = get_id_rid(monitor_report.id, physics_ids);
+            // Resolve the RapierId stored in instance_id to the real Godot instance_id
+            let godot_instance_id: i64 = if let Some(obj_rid) =
+                physics_data.ids.get(&monitor_report.instance_id)
+                && let Some(obj) = physics_data.collision_objects.get(obj_rid)
+            {
+                obj.get_base().get_instance_id() as i64
+            } else {
+                0
+            };
             let arg_array = if monitor_report.state > 0 {
                 vec![
                     AreaBodyStatus::ADDED.to_variant(),
                     rid.to_variant(),
-                    (monitor_report.instance_id as i64).to_variant(),
+                    godot_instance_id.to_variant(),
                     monitor_report.object_shape_index.to_variant(),
                     monitor_report.this_area_shape_index.to_variant(),
                 ]
@@ -715,7 +816,7 @@ impl RapierArea {
                 vec![
                     AreaBodyStatus::REMOVED.to_variant(),
                     rid.to_variant(),
-                    (monitor_report.instance_id as i64).to_variant(),
+                    godot_instance_id.to_variant(),
                     monitor_report.object_shape_index.to_variant(),
                     monitor_report.this_area_shape_index.to_variant(),
                 ]
@@ -740,17 +841,18 @@ impl RapierArea {
     ) {
         let mut add_to_monitored_list = false;
         let mut monitors_to_remove: Vec<(ColliderHandle, ColliderHandle)> = Vec::new();
-        for ((handle_1, handle_2), monitor_info) in &mut self.state.monitored_objects {
+        for (monitor_key, monitor_info) in &mut self.state.monitored_objects {
             // If our stale colliders contain a pair in either order:
-            let ab = ColliderPair::new(*handle_1, *handle_2);
-            let ba = ColliderPair::new(*handle_2, *handle_1);
+            let (handle_1, handle_2) = *monitor_key;
+            let ab = ColliderPair::new(handle_1, handle_2);
+            let ba = ColliderPair::new(handle_2, handle_1);
             if stale_collider_pairs.contains(&ab) || stale_collider_pairs.contains(&ba) {
                 add_to_monitored_list = true;
                 let new_exit_event = EventReport::from_monitor_info(*monitor_info, -1);
                 self.state
                     .unhandled_events
-                    .insert(*handle_1, new_exit_event);
-                monitors_to_remove.push((*handle_1, *handle_2));
+                    .insert(*monitor_key, new_exit_event);
+                monitors_to_remove.push(*monitor_key);
             }
         }
         for removal in monitors_to_remove {
@@ -769,16 +871,17 @@ impl RapierArea {
         new_collider_pairs: &[ColliderPair],
     ) {
         let mut add_to_monitored_list = false;
-        for ((handle_1, handle_2), monitor_info) in &mut self.state.monitored_objects {
+        for (monitor_key, monitor_info) in &mut self.state.monitored_objects {
             // If our stale colliders contain a pair in either order:
-            let ab = ColliderPair::new(*handle_1, *handle_2);
-            let ba = ColliderPair::new(*handle_2, *handle_1);
+            let (handle_1, handle_2) = *monitor_key;
+            let ab = ColliderPair::new(handle_1, handle_2);
+            let ba = ColliderPair::new(handle_2, handle_1);
             if new_collider_pairs.contains(&ab) || new_collider_pairs.contains(&ba) {
                 add_to_monitored_list = true;
                 let new_exit_event = EventReport::from_monitor_info(*monitor_info, 1);
                 self.state
                     .unhandled_events
-                    .insert(*handle_1, new_exit_event);
+                    .insert(*monitor_key, new_exit_event);
             }
         }
         if add_to_monitored_list {
@@ -1060,5 +1163,143 @@ impl IRapierCollisionObject for RapierArea {
         _physics_spaces: &mut PhysicsSpaces,
         _physics_ids: &PhysicsIds,
     ) {
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn collider_handle(index: u32) -> ColliderHandle {
+        ColliderHandle::from_raw_parts(index, 0)
+    }
+    fn monitor_key(this_collider: ColliderHandle, other_collider: ColliderHandle) -> MonitorKey {
+        RapierAreaState::monitor_key(this_collider, other_collider)
+    }
+    fn event_report(state: i32) -> EventReport {
+        EventReport {
+            id: 42,
+            collision_object_type: CollisionObjectType::Area,
+            state,
+            instance_id: 7,
+            object_shape_index: 0,
+            this_area_shape_index: 0,
+        }
+    }
+    #[test]
+    fn stale_removed_exit_without_monitor_is_ignored() {
+        let mut state = RapierAreaState::default();
+        let result = state.process_monitor_event(
+            collider_handle(1),
+            collider_handle(2),
+            &event_report(-1),
+            true,
+        );
+        assert_eq!(result, MonitorEventResult::StaleRemovedExit);
+        assert!(state.monitored_objects.is_empty());
+    }
+    #[test]
+    fn non_removed_exit_without_monitor_is_reported_as_missing() {
+        let mut state = RapierAreaState::default();
+        let result = state.process_monitor_event(
+            collider_handle(1),
+            collider_handle(2),
+            &event_report(-1),
+            false,
+        );
+        assert_eq!(result, MonitorEventResult::MissingExit);
+    }
+    #[test]
+    fn monitor_event_lifetime_counts_contacts() {
+        let mut state = RapierAreaState::default();
+        let this_collider = collider_handle(1);
+        let other_collider = collider_handle(2);
+        assert_eq!(
+            state.process_monitor_event(this_collider, other_collider, &event_report(1), false),
+            MonitorEventResult::Contacts(1)
+        );
+        assert_eq!(
+            state.process_monitor_event(this_collider, other_collider, &event_report(1), false),
+            MonitorEventResult::Contacts(2)
+        );
+        assert_eq!(
+            state.process_monitor_event(this_collider, other_collider, &event_report(-1), false),
+            MonitorEventResult::Contacts(1)
+        );
+        assert_eq!(
+            state.process_monitor_event(this_collider, other_collider, &event_report(-1), false),
+            MonitorEventResult::Contacts(0)
+        );
+        assert!(
+            !state
+                .monitored_objects
+                .contains_key(&(other_collider, this_collider))
+        );
+    }
+    #[test]
+    fn unhandled_opposite_event_matches_recreated_collider_for_same_shape_pair() {
+        let mut state = RapierAreaState::default();
+        let removed_collider = collider_handle(2);
+        let added_collider = collider_handle(3);
+        let this_collider = collider_handle(1);
+        state.unhandled_events.insert(
+            monitor_key(this_collider, removed_collider),
+            event_report(-1),
+        );
+        assert_eq!(
+            state.find_opposite_unhandled_event_for_shape(
+                monitor_key(this_collider, added_collider),
+                &event_report(1)
+            ),
+            Some(monitor_key(this_collider, removed_collider))
+        );
+    }
+    #[test]
+    fn unhandled_opposite_event_ignores_different_shape_pair() {
+        let mut state = RapierAreaState::default();
+        let removed_collider = collider_handle(2);
+        let added_collider = collider_handle(3);
+        let this_collider = collider_handle(1);
+        state.unhandled_events.insert(
+            monitor_key(this_collider, removed_collider),
+            event_report(-1),
+        );
+        let mut different_shape_event = event_report(1);
+        different_shape_event.object_shape_index = 1;
+        assert_eq!(
+            state.find_opposite_unhandled_event_for_shape(
+                monitor_key(this_collider, added_collider),
+                &different_shape_event
+            ),
+            None
+        );
+    }
+    #[test]
+    fn unhandled_events_preserve_multiple_local_shapes_for_same_other_collider() {
+        let mut state = RapierAreaState::default();
+        let other_collider = collider_handle(2);
+        let this_collider_1 = collider_handle(10);
+        let this_collider_2 = collider_handle(11);
+        let mut second_event = event_report(1);
+        second_event.this_area_shape_index = 1;
+        state.unhandled_events.insert(
+            monitor_key(this_collider_1, other_collider),
+            event_report(1),
+        );
+        state
+            .unhandled_events
+            .insert(monitor_key(this_collider_2, other_collider), second_event);
+        assert_eq!(state.unhandled_events.len(), 2);
+    }
+    #[cfg(feature = "serde-serialize")]
+    #[test]
+    fn area_state_does_not_serialize_unhandled_events() {
+        let mut state = RapierAreaState::default();
+        state.unhandled_events.insert(
+            monitor_key(collider_handle(1), collider_handle(2)),
+            event_report(1),
+        );
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(!json.contains("unhandled_events"));
+        let imported_state: RapierAreaState = serde_json::from_str(&json).unwrap();
+        assert!(imported_state.unhandled_events.is_empty());
     }
 }

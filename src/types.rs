@@ -1,9 +1,8 @@
 use godot::classes::*;
 use godot::prelude::*;
-#[cfg(feature = "dim2")]
-use rapier::math::Matrix;
-use rapier::math::Real;
 use rapier::math::Rotation;
+#[cfg(feature = "dim2")]
+use rapier::na::ComplexField;
 #[cfg(feature = "single")]
 pub type PackedFloatArray = PackedFloat32Array;
 #[cfg(feature = "double")]
@@ -120,47 +119,80 @@ pub fn world_to_local_no_scale(transform: &Transform, world_pos: Vector) -> Vect
         // Degenerate scale, return as-is
         return transform.affine_inverse() * world_pos;
     }
-    // Remove scale from the transform
-    let rotation = transform.rotation();
+    // Extract rotation deterministically from basis vectors
+    let ax = transform.a.x;
+    let ay = transform.a.y;
+    let len: real = ComplexField::sqrt(ax * ax + ay * ay);
+    let (cos_r, sin_r) = if len > 0.0 {
+        (ax / len, ay / len)
+    } else {
+        (1.0, 0.0)
+    };
+    // Build a unit-scale transform from the deterministic rotation
     let origin = transform.origin;
-    let transform_no_scale = Transform::from_angle_scale_skew_origin(
-        rotation,
-        Vector::new(1.0, 1.0),
-        transform.skew(),
+    let transform_no_scale = Transform2D {
+        a: Vector2::new(cos_r, sin_r),
+        b: Vector2::new(-sin_r, cos_r),
         origin,
-    );
+    };
     transform_no_scale.affine_inverse() * world_pos
 }
 #[cfg(feature = "dim2")]
-pub fn transform_update(
-    transform: &Transform,
-    rotation: Rotation<Real>,
-    origin: Vector,
-) -> Transform {
-    let shear_matrix = get_shear_matrix(transform);
-    let shear_rotation_matrix = Matrix::<Real>::from(rotation) * shear_matrix;
-    let a = shear_rotation_matrix.column(0).normalize() * transform.scale().x;
-    let b = shear_rotation_matrix.column(1).normalize() * transform.scale().y;
-    Transform2D {
-        a: Vector2::new(a.x, a.y),
-        b: Vector2::new(b.x, b.y),
-        origin,
+pub fn transform_update(transform: &Transform, rotation: Rotation, origin: Vector) -> Transform {
+    // Use deterministic math to avoid platform-dependent transcendental functions.
+    // This is critical for cross-platform determinism with the enhanced-determinism feature.
+    //
+    // The rotation is a UnitComplex (cos θ, sin θ) from rapier — already deterministic.
+    // We need to compute the delta rotation and apply it to the existing basis vectors.
+    let cos_new = rotation.re;
+    let sin_new = rotation.im;
+    // Extract current rotation deterministically from the 'a' basis vector.
+    let ax = transform.a.x;
+    let ay = transform.a.y;
+    let len_a: real = ComplexField::sqrt(ax * ax + ay * ay);
+    let (cos_old, sin_old) = if len_a > 0.0 {
+        (ax / len_a, ay / len_a)
+    } else {
+        (1.0, 0.0)
+    };
+    // Compute delta rotation: new * inverse(old)
+    // inverse of (cos, sin) = (cos, -sin) for unit complex
+    // (cos_new + i*sin_new) * (cos_old - i*sin_old)
+    let cos_delta = cos_new * cos_old + sin_new * sin_old;
+    let sin_delta = sin_new * cos_old - cos_new * sin_old;
+    // Apply delta rotation to both basis vectors to preserve skew and scale.
+    // Rotation of vector (x, y) by angle: (x*cos - y*sin, x*sin + y*cos)
+    let mut a = Vector2::new(
+        transform.a.x * cos_delta - transform.a.y * sin_delta,
+        transform.a.x * sin_delta + transform.a.y * cos_delta,
+    );
+    let mut b = Vector2::new(
+        transform.b.x * cos_delta - transform.b.y * sin_delta,
+        transform.b.x * sin_delta + transform.b.y * cos_delta,
+    );
+    // Re-normalize to prevent scale drift from repeated rotations.
+    // Use deterministic sqrt via ComplexField (backed by libm with enhanced-determinism).
+    let new_len_a: real = ComplexField::sqrt(a.x * a.x + a.y * a.y);
+    if !len_a.is_zero_approx() && !new_len_a.is_zero_approx() {
+        let correction_a = len_a / new_len_a;
+        a *= correction_a;
     }
+    let bx = transform.b.x;
+    let by = transform.b.y;
+    let len_b: real = ComplexField::sqrt(bx * bx + by * by);
+    let new_len_b: real = ComplexField::sqrt(b.x * b.x + b.y * b.y);
+    if !len_b.is_zero_approx() && !new_len_b.is_zero_approx() {
+        let correction_b = len_b / new_len_b;
+        b *= correction_b;
+    }
+    Transform2D { a, b, origin }
 }
 #[cfg(feature = "dim3")]
-pub fn transform_update(
-    transform: &Transform,
-    rotation: Rotation<Real>,
-    origin: Vector,
-) -> Transform {
+pub fn transform_update(transform: &Transform, rotation: Rotation, origin: Vector) -> Transform {
     use godot::builtin::Basis;
-    let quaternion = rotation.quaternion();
     let new_transform = Transform::new(
         Basis::from_quaternion(Quaternion::new(
-            quaternion.coords.x,
-            quaternion.coords.y,
-            quaternion.coords.z,
-            quaternion.coords.w,
+            rotation.x, rotation.y, rotation.z, rotation.w,
         )),
         origin,
     );
@@ -168,25 +200,30 @@ pub fn transform_update(
     new_transform.scaled_local(scale)
 }
 #[cfg(feature = "dim3")]
-pub fn transform_rotation_rapier(transform: &godot::builtin::Transform3D) -> Rotation<Real> {
-    use rapier::na::Vector4;
+pub fn transform_rotation_rapier(transform: &godot::builtin::Transform3D) -> Rotation {
     let quaternion = transform.basis.get_quaternion();
-    Rotation::from_quaternion(rapier::na::Quaternion {
-        coords: Vector4::new(quaternion.x, quaternion.y, quaternion.z, quaternion.w),
-    })
+    Rotation::from_xyzw(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
 }
 #[cfg(feature = "dim2")]
-pub fn transform_rotation_rapier(transform: &godot::builtin::Transform2D) -> Rotation<Real> {
-    let angle = transform.rotation();
-    Rotation::from_angle(angle)
+pub fn transform_rotation_rapier(transform: &godot::builtin::Transform2D) -> Rotation {
+    // Instead of calling transform.rotation() which uses Godot's platform-dependent atan2,
+    // extract the rotation directly from the basis vectors using deterministic math.
+    // The 'a' column of Transform2D is (cos*scale_x, sin*scale_x).
+    // We need the unit vector direction, which gives us (cos, sin) for the Rotation.
+    let ax = transform.a.x;
+    let ay = transform.a.y;
+    let len: real = ComplexField::sqrt(ax * ax + ay * ay);
+    if len > 0.0 {
+        // Rotation (UnitComplex) stores (cos, sin) = (re, im)
+        Rotation::from_cos_sin_unchecked(ax / len, ay / len)
+    } else {
+        Rotation::identity()
+    }
 }
 #[cfg(feature = "dim3")]
-pub fn basis_to_rapier(basis: godot::builtin::Basis) -> Rotation<Real> {
-    use rapier::na::Vector4;
+pub fn basis_to_rapier(basis: godot::builtin::Basis) -> Rotation {
     let quaternion = basis.get_quaternion();
-    Rotation::from_quaternion(rapier::na::Quaternion {
-        coords: Vector4::new(quaternion.x, quaternion.y, quaternion.z, quaternion.w),
-    })
+    Rotation::from_xyzw(quaternion.x, quaternion.y, quaternion.z, quaternion.w)
 }
 pub fn vector_normalized(vector: Vector) -> Vector {
     if vector != Vector::ZERO {
@@ -206,16 +243,6 @@ pub fn variant_to_int(variant: &Variant) -> i32 {
         VariantType::INT => variant.to::<i32>(),
         _ => 0,
     }
-}
-#[cfg(feature = "dim2")]
-fn get_shear_matrix(transform: &Transform) -> Matrix<Real> {
-    let det_sign = transform.determinant().signum();
-    let minus_sin_skew = transform
-        .a
-        .normalized_or_zero()
-        .dot(det_sign * transform.b.normalized_or_zero());
-    let cos_skew = (1. - minus_sin_skew * minus_sin_skew).sqrt();
-    Matrix::new(1., minus_sin_skew, 0., cos_skew)
 }
 #[cfg(feature = "dim2")]
 #[cfg(test)]

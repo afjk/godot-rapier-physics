@@ -392,6 +392,46 @@ func test_start() -> void:
 		var body_freeze_monitor := create_generic_manual_monitor(body, freeze_test, simulation_duration)
 		body_freeze_monitor.data["position"] = test_position
 
+	if true:
+		var test_position = next_test_position()
+		var current_layer = next_test_layer()
+		var body := create_rigid_body(current_layer, test_position)
+		body.gravity_scale = 1
+		body.freeze_mode = RigidBody2D.FREEZE_MODE_STATIC
+		body.contact_monitor = true
+		body.max_contacts_reported = 4
+		create_static_body(current_layer, test_position + Vector2(0, 80), 3)
+
+		var freeze_static_after_contact_test = func(p_target: RigidBody2D, p_monitor: GenericManualMonitor):
+			if p_monitor.data.get("check_frame", 0) > 0:
+				if p_monitor.frame < p_monitor.data["check_frame"]:
+					return
+				p_monitor.add_test("Body frozen as static stays still after contact and teleport")
+				var expected: Vector2 = p_monitor.data["position"]
+				var success := Utils.vec2_equals(p_target.global_position, expected, 1.0) and p_target.linear_velocity.length() < 0.01
+				if not success:
+					p_monitor.add_test_error("Frozen static body moved after teleport, expected %v, got %v, velocity %v" % [expected, p_target.global_position, p_target.linear_velocity])
+				p_monitor.add_test_result(success)
+				reset_body(p_target)
+				p_monitor.monitor_completed()
+				return
+
+			if p_monitor.data.get("teleport_frame", 0) > 0:
+				if p_monitor.frame < p_monitor.data["teleport_frame"]:
+					return
+				p_target.global_position -= Vector2(0, 100)
+				p_target.linear_velocity = Vector2.ZERO
+				p_monitor.data["position"] = p_target.global_position
+				p_monitor.data["check_frame"] = p_monitor.frame + 8
+				return
+
+			if not p_target.get_colliding_bodies().is_empty():
+				p_target.linear_velocity = Vector2.ZERO
+				p_target.freeze = true
+				p_target.linear_velocity = Vector2.ZERO
+				p_monitor.data["teleport_frame"] = p_monitor.frame + 1
+
+		create_generic_manual_monitor(body, freeze_static_after_contact_test, simulation_duration)
 
 	if true:
 		var test_position = next_test_position()
@@ -406,6 +446,33 @@ func test_start() -> void:
 
 		var monitor := create_generic_expiration_monitor(self, damping_test, null, 1)
 		monitor.test_name = "Damping works"
+
+	if true:
+		var test_position = next_test_position()
+		var current_layer = next_test_layer()
+		var space := get_world_2d().space
+		var previous_linear_damp: float = PhysicsServer2D.area_get_param(space, PhysicsServer2D.AreaParameter.AREA_PARAM_LINEAR_DAMP)
+		var damping := 2.6
+		PhysicsServer2D.area_set_param(space, PhysicsServer2D.AreaParameter.AREA_PARAM_LINEAR_DAMP, damping)
+		var body_with_default_damping := create_rigid_body(current_layer, test_position + Vector2(0, -80), false)
+		var body_with_replace_damping := create_rigid_body(current_layer, test_position, false)
+		body_with_replace_damping.linear_damp_mode = RigidBody2D.DAMP_MODE_REPLACE
+		body_with_replace_damping.linear_damp = damping
+		body_with_default_damping.linear_velocity = Vector2(400, 0)
+		body_with_replace_damping.linear_velocity = Vector2(400, 0)
+
+		var replace_damping_test = func(_p_target: RigidBody2D, p_monitor: GenericManualMonitor):
+			if p_monitor.frame == 60:
+				PhysicsServer2D.area_set_param(space, PhysicsServer2D.AreaParameter.AREA_PARAM_LINEAR_DAMP, previous_linear_damp)
+				p_monitor.add_test("Linear damping replace mode matches world default")
+				var delta: float = absf(body_with_default_damping.position.x - body_with_replace_damping.position.x)
+				var success: bool = delta < 1.0
+				if not success:
+					p_monitor.add_test_error("Linear damping replace mode mismatch, default x %s, replace x %s, delta %s" % [body_with_default_damping.position.x, body_with_replace_damping.position.x, delta])
+				p_monitor.add_test_result(success)
+				p_monitor.monitor_completed()
+
+		create_generic_manual_monitor(body_with_default_damping, replace_damping_test, simulation_duration)
 		
 func reset_body(p_body: RigidBody2D) -> void:
 	p_body.freeze = false
