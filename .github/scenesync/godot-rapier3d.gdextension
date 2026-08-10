@@ -1,0 +1,15 @@
+[configuration]
+
+entry_symbol = "rapier_3d_init"
+compatibility_minimum = 4.6
+
+[libraries]
+
+macos.debug = "bin/libgodot_rapier.macos.framework"
+macos.release = "bin/libgodot_rapier.macos.framework"
+windows.debug.x86_64 = "bin/libgodot_rapier.windows.x86_64-pc-windows-msvc.dll"
+windows.release.x86_64 = "bin/libgodot_rapier.windows.x86_64-pc-windows-msvc.dll"
+linux.debug.x86_64 = "bin/libgodot_rapier.linux.x86_64-unknown-linux-gnu.so"
+linux.release.x86_64 = "bin/libgodot_rapier.linux.x86_64-unknown-linux-gnu.so"
+android.debug.arm64 = "bin/libgodot_rapier.android.aarch64-linux-android.so"
+android.release.arm64 = "bin/libgodot_rapier.android.aarch64-linux-android.so"
