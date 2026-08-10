@@ -7,6 +7,18 @@ use crate::servers::rapier_physics_singleton::physics_data;
 use crate::spaces::RapierDirectSpaceState;
 use crate::spaces::rapier_space::RapierSpace;
 use crate::types::*;
+#[cfg(feature = "api-4-6")]
+type SpaceStateResult = Gd<PhysicsDirectSpaceState3D>;
+#[cfg(not(feature = "api-4-6"))]
+type SpaceStateResult = Option<Gd<PhysicsDirectSpaceState3D>>;
+#[cfg(feature = "api-4-6")]
+fn wrap_space_state(state: Gd<PhysicsDirectSpaceState3D>) -> SpaceStateResult {
+    state
+}
+#[cfg(not(feature = "api-4-6"))]
+fn wrap_space_state(state: Gd<PhysicsDirectSpaceState3D>) -> SpaceStateResult {
+    Some(state)
+}
 #[derive(GodotClass)]
 #[class(base=PhysicsDirectBodyState3DExtension,tool)]
 /// The direct body state singleton implemented for Rapier Physics.
@@ -213,7 +225,7 @@ impl IPhysicsDirectBodyState3DExtension for RapierDirectBodyState3D {
         self.implementation.integrate_forces();
     }
 
-    fn get_space_state(&mut self) -> Option<Gd<PhysicsDirectSpaceState3D>> {
+    fn get_space_state(&mut self) -> SpaceStateResult {
         let physics_data = physics_data();
         if let Some(body) = physics_data
             .collision_objects
@@ -223,14 +235,14 @@ impl IPhysicsDirectBodyState3DExtension for RapierDirectBodyState3D {
                 .get(&body.get_base().get_space(&physics_data.ids))
             && let Some(state) = space.get_direct_state().clone()
         {
-            return Some(state);
+            return wrap_space_state(state);
         }
         // Error case, should never happen
         godot_error!(
             "RapierDirectBodyState3D: could not get space state for body {:?}",
             self.implementation.get_body()
         );
-        Some(RapierDirectSpaceState::new_alloc().upcast())
+        wrap_space_state(RapierDirectSpaceState::new_alloc().upcast())
     }
 
     fn set_collision_layer(&mut self, layer: u32) {
