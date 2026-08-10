@@ -93,6 +93,16 @@ cargo test --locked --no-default-features \
   --lib scenesync_parity
 ```
 
+Prebuilt SceneSync releases are published from fixed `scenesync-v*` tags. The
+combined addon archive contains Godot 4.6.3 binaries for Linux x86_64, Windows
+x86_64, macOS universal (arm64 and x86_64), and Android arm64. Copy its `addons`
+directory into the Godot project and verify the archive against `SHA256SUMS`.
+
+Every release is gated by the browser-compatible freefall, contact, and rotating
+contact hashes on Linux x86_64/arm64, Windows x86_64, and macOS x86_64/arm64.
+Android arm64 is cross-compiled from the same locked source and feature set;
+device execution remains part of the consuming SDK's Quest smoke test.
+
 # Youtube Videos
 
 GamesFromScratch:

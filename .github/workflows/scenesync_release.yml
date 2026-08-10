@@ -1,0 +1,235 @@
+name: SceneSync Rapier Build and Release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - scenesync/godot-4.6
+  push:
+    branches:
+      - scenesync/godot-4.6
+    tags:
+      - "scenesync-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenesync-rapier-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  SCENESYNC_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity,api-custom
+  SCENESYNC_TEST_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity
+
+jobs:
+  fixture-hashes:
+    name: Fixture hashes (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-22.04
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: windows-x86_64
+            runner: windows-2022
+          - name: macos-x86_64
+            runner: macos-15-intel
+          - name: macos-arm64
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify browser-compatible fixture hashes
+        shell: bash
+        run: |
+          rustc -vV
+          cargo test --locked --no-default-features \
+            --features="${SCENESYNC_TEST_FEATURES}" \
+            --lib scenesync_parity
+
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - name: macos-universal
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - name: android-arm64
+            runner: ubuntu-22.04
+            target: aarch64-linux-android
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Godot 4.6.3
+        uses: appsinacup/setup-godot-action@main
+        with:
+          version: 4.6.3-stable
+      - name: Install Linux build dependencies
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libunwind-dev llvm-dev libclang-dev clang
+      - name: Setup Android NDK
+        if: matrix.name == 'android-arm64'
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r23c
+      - name: Configure Android compiler
+        if: matrix.name == 'android-arm64'
+        shell: bash
+        run: |
+          ndk_path="${{ steps.setup-ndk.outputs.ndk-path }}"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android23-clang" >> "${GITHUB_ENV}"
+          echo "CLANG_PATH=${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> "${GITHUB_ENV}"
+          echo "LIBCLANG_PATH=${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/lib64/libclang.so.12git" >> "${GITHUB_ENV}"
+      - name: Build SceneSync GDExtension
+        uses: ./.github/actions/build
+        with:
+          arch: ${{ matrix.target }}
+          features: ${{ env.SCENESYNC_FEATURES }}
+      - name: Stage platform binary
+        shell: bash
+        run: |
+          binary_root="stage/addons/godot-rapier3d/bin"
+          mkdir -p "${binary_root}"
+          case "${{ matrix.name }}" in
+            linux-x86_64)
+              cp target/release/libgodot_rapier.so \
+                "${binary_root}/libgodot_rapier.linux.x86_64-unknown-linux-gnu.so"
+              ;;
+            windows-x86_64)
+              cp target/release/godot_rapier.dll \
+                "${binary_root}/libgodot_rapier.windows.x86_64-pc-windows-msvc.dll"
+              ;;
+            macos-universal)
+              cp -R \
+                bin3d/addons/godot-rapier3d/bin/libgodot_rapier.macos.framework \
+                "${binary_root}/"
+              cp target/release/libgodot_rapier.dylib \
+                "${binary_root}/libgodot_rapier.macos.framework/libgodot_rapier.macos.dylib"
+              codesign --force --deep --sign - \
+                "${binary_root}/libgodot_rapier.macos.framework"
+              ;;
+            android-arm64)
+              cp target/release/libgodot_rapier.so \
+                "${binary_root}/libgodot_rapier.android.aarch64-linux-android.so"
+              ;;
+          esac
+      - name: Upload platform binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenesync-rapier-${{ matrix.name }}
+          path: stage/
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: Package release bundle
+    runs-on: ubuntu-22.04
+    needs:
+      - fixture-hashes
+      - build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scenesync-rapier-*
+          path: dist/artifacts
+      - name: Assemble addon and platform archives
+        shell: bash
+        run: |
+          mkdir -p dist/combined/addons
+          cp -R bin3d/addons/godot-rapier3d dist/combined/addons/
+
+          for artifact in dist/artifacts/scenesync-rapier-*; do
+            cp -R "${artifact}/addons/." dist/combined/addons/
+          done
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            release_version="${GITHUB_REF_NAME}"
+          else
+            release_version="scenesync-ci-${GITHUB_SHA:0:12}"
+          fi
+          plugin_info="dist/combined/addons/godot-rapier3d/plugin.info.cfg"
+          sed -i 's/flavour="<flavour>"/flavour="scenesync-parity"/' "${plugin_info}"
+          sed -i "s/version=\"0.8.28\"/version=\"${release_version}\"/" "${plugin_info}"
+
+          build_info="dist/combined/addons/godot-rapier3d/SCENESYNC_BUILD.txt"
+          {
+            echo "version=${release_version}"
+            echo "commit=${GITHUB_SHA}"
+            echo "godot=4.6.3"
+            echo "rapier=0.30.0"
+            echo "features=${SCENESYNC_FEATURES}"
+            echo "platforms=linux-x86_64,windows-x86_64,macos-universal,android-arm64"
+          } > "${build_info}"
+
+          (
+            cd dist/combined
+            zip -qr ../scenesync-godot-rapier3d-addon.zip addons
+          )
+
+          for artifact in dist/artifacts/scenesync-rapier-*; do
+            artifact_name="$(basename "${artifact}")"
+            (
+              cd "${artifact}"
+              zip -qr "${GITHUB_WORKSPACE}/dist/${artifact_name}.zip" addons
+            )
+          done
+
+          cd dist
+          sha256sum ./*.zip > SHA256SUMS
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenesync-release-bundle
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    needs:
+      - package
+    permissions:
+      contents: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: scenesync-release-bundle
+          path: release
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SceneSync Godot Rapier ${{ github.ref_name }}
+          prerelease: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Deterministic SceneSync Rapier build for Godot 4.6.3.
+
+            Install `scenesync-godot-rapier3d-addon.zip` for the complete addon.
+            The platform archives contain only the matching addon binary tree.
+            Verify downloaded files with `SHA256SUMS`.
+          files: |
+            release/*.zip
+            release/SHA256SUMS
