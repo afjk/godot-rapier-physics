@@ -21,6 +21,7 @@ dim3 = []
 single = []
 double = ["godot/double-precision"]
 api-custom = ["godot/api-custom"]
+api-4-6 = ["godot/api-4-6"]
 enhanced-determinism = ["rapier2d/enhanced-determinism", "rapier2d-f64/enhanced-determinism", "rapier3d/enhanced-determinism", "rapier3d-f64/enhanced-determinism"]
 serde-serialize = ["serde", "hashbrown/serde", "bincode", "serde_json", "godot/serde", "rapier2d/serde-serialize", "rapier2d-f64/serde-serialize", "rapier3d/serde-serialize", "rapier3d-f64/serde-serialize" ]
 scenesync-parity = ["dep:scenesync-rapier3d"]
@@ -45,7 +46,7 @@ hashbrown = { version = "0.16", features=["nightly", "inline-more", "default-has
 num_cpus = { version = "1", optional = true }
 
 # Disabled for now "safeguards-release-disengaged"] }
-godot = { version = "0.4.5", features=["register-docs"] }
+godot = { version = "=0.5.3", features=["register-docs"] }
 
 rapier2d = { git = "https://github.com/ughuuu/rapier", branch = "master", optional = true }
 rapier2d-f64 = { git = "https://github.com/ughuuu/rapier", branch = "master", optional = true}

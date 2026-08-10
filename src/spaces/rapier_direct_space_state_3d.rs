@@ -1,4 +1,5 @@
 use godot::classes::*;
+use godot::meta::conv::RawPtr;
 use godot::prelude::*;
 
 use super::rapier_direct_space_state_impl::RapierDirectSpaceStateImpl;
@@ -39,7 +40,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
         hit_from_inside: bool,
         _hit_back_faces: bool,
         _pick_ray: bool,
-        result: *mut PhysicsServerExtensionRayResult,
+        result: RawPtr<*mut PhysicsServerExtensionRayResult>,
     ) -> bool {
         let physics_data = physics_data();
         unsafe {
@@ -50,7 +51,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
                 collide_with_bodies,
                 collide_with_areas,
                 hit_from_inside,
-                result,
+                result.ptr(),
                 physics_data,
             )
         }
@@ -62,7 +63,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
         collision_mask: u32,
         collide_with_bodies: bool,
         collide_with_areas: bool,
-        results: *mut PhysicsServerExtensionShapeResult,
+        results: RawPtr<*mut PhysicsServerExtensionShapeResult>,
         max_results: i32,
     ) -> i32 {
         let physics_data = physics_data();
@@ -73,7 +74,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
                 collision_mask,
                 collide_with_bodies,
                 collide_with_areas,
-                results,
+                results.ptr(),
                 max_results,
                 physics_data,
             )
@@ -89,7 +90,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
         collision_mask: u32,
         collide_with_bodies: bool,
         collide_with_areas: bool,
-        results: *mut PhysicsServerExtensionShapeResult,
+        results: RawPtr<*mut PhysicsServerExtensionShapeResult>,
         max_results: i32,
     ) -> i32 {
         let physics_data = physics_data();
@@ -102,7 +103,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
                 collision_mask,
                 collide_with_bodies,
                 collide_with_areas,
-                results,
+                results.ptr(),
                 max_results,
                 physics_data,
             )
@@ -118,9 +119,9 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
         collision_mask: u32,
         collide_with_bodies: bool,
         collide_with_areas: bool,
-        closest_safe: *mut f64,
-        closest_unsafe: *mut f64,
-        _info: *mut PhysicsServerExtensionShapeRestInfo,
+        closest_safe: RawPtr<*mut f64>,
+        closest_unsafe: RawPtr<*mut f64>,
+        _info: RawPtr<*mut PhysicsServerExtensionShapeRestInfo>,
     ) -> bool {
         let physics_data = physics_data();
         unsafe {
@@ -132,8 +133,8 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
                 collision_mask,
                 collide_with_bodies,
                 collide_with_areas,
-                closest_safe,
-                closest_unsafe,
+                closest_safe.ptr(),
+                closest_unsafe.ptr(),
                 physics_data,
             )
         }
@@ -148,9 +149,9 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
         collision_mask: u32,
         collide_with_bodies: bool,
         collide_with_areas: bool,
-        results: *mut std::ffi::c_void,
+        results: RawPtr<*mut std::ffi::c_void>,
         max_results: i32,
-        result_count: *mut i32,
+        result_count: RawPtr<*mut i32>,
     ) -> bool {
         let physics_data = physics_data();
         unsafe {
@@ -162,9 +163,9 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
                 collision_mask,
                 collide_with_bodies,
                 collide_with_areas,
-                results,
+                results.ptr(),
                 max_results,
-                result_count,
+                result_count.ptr(),
                 physics_data,
             )
         }
@@ -179,7 +180,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
         collision_mask: u32,
         collide_with_bodies: bool,
         collide_with_areas: bool,
-        rest_info: *mut PhysicsServerExtensionShapeRestInfo,
+        rest_info: RawPtr<*mut PhysicsServerExtensionShapeRestInfo>,
     ) -> bool {
         let physics_data = physics_data();
         unsafe {
@@ -191,7 +192,7 @@ impl IPhysicsDirectSpaceState3DExtension for RapierDirectSpaceState3D {
                 collision_mask,
                 collide_with_bodies,
                 collide_with_areas,
-                rest_info,
+                rest_info.ptr(),
                 physics_data,
             )
         }
