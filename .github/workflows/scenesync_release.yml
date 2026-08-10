@@ -19,8 +19,9 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
-  SCENESYNC_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity,api-4-6
+  SCENESYNC_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity
   SCENESYNC_TEST_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity,api-4-6
+  SCENESYNC_API_FEATURE: api-4-6
 
 jobs:
   fixture-hashes:
@@ -101,6 +102,7 @@ jobs:
         with:
           arch: ${{ matrix.target }}
           features: ${{ env.SCENESYNC_FEATURES }}
+          api_feature: ${{ env.SCENESYNC_API_FEATURE }}
       - name: Stage platform binary
         shell: bash
         run: |
