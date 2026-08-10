@@ -98,6 +98,11 @@ jobs:
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android23-clang" >> "${GITHUB_ENV}"
           echo "CLANG_PATH=${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> "${GITHUB_ENV}"
           echo "LIBCLANG_PATH=${ndk_path}/toolchains/llvm/prebuilt/linux-x86_64/lib64/libclang.so.12git" >> "${GITHUB_ENV}"
+      - name: Configure macOS LLVM
+        if: matrix.name == 'macos-universal'
+        shell: bash
+        run: |
+          echo "LLVM_PATH=$(brew --prefix llvm)/bin" >> "${GITHUB_ENV}"
       - name: Build SceneSync GDExtension
         uses: ./.github/actions/build
         with:
