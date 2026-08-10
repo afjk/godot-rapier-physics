@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
-  SCENESYNC_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity,api-custom
+  SCENESYNC_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity,api-4-6
   SCENESYNC_TEST_FEATURES: single-dim3,serde-serialize,enhanced-determinism,scenesync-parity
 
 jobs:
@@ -71,13 +71,16 @@ jobs:
             target: aarch64-linux-android
     steps:
       - uses: actions/checkout@v4
-      - name: Setup compatible Godot extension API
+      - name: Setup Godot 4.6.3
         uses: appsinacup/setup-godot-action@main
         with:
-          # godot-rust 0.4.5 cannot generate bindings from the 4.6.3 API.
-          # The 4.5 GDExtension API is forward-compatible with Godot 4.6;
-          # the addon descriptor keeps compatibility_minimum = 4.6.
-          version: 4.5-stable
+          version: 4.6.3-stable
+      - name: Prepare Godot 4.6 extension API
+        shell: bash
+        run: |
+          api_json="${RUNNER_TEMP}/godot-4.6.3-extension-api.json"
+          .github/scripts/prepare_godot_4_6_api.sh "${GODOT4_BIN}" "${api_json}"
+          echo "GODOT4_GDEXTENSION_JSON=${api_json}" >> "${GITHUB_ENV}"
       - name: Install Linux build dependencies
         if: matrix.name == 'linux-x86_64'
         shell: bash
@@ -181,7 +184,7 @@ jobs:
             echo "version=${release_version}"
             echo "commit=${GITHUB_SHA}"
             echo "godot_runtime=4.6.3"
-            echo "godot_extension_api=4.5"
+            echo "godot_extension_api=4.6"
             echo "rapier=0.30.0"
             echo "features=${SCENESYNC_FEATURES}"
             echo "platforms=linux-x86_64,windows-x86_64,macos-universal,android-arm64"

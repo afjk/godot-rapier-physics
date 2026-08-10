@@ -345,6 +345,7 @@ checksum = "f38b6e65306c05e3c3f0131ee8dbf7394691e53268d72019007ec20687f2280f"
 dependencies = [
  "bindgen",
  "gdextension-api",
+ "nanoserde",
  "regex",
  "which",
 ]
