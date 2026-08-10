@@ -419,7 +419,8 @@ dependencies = [
  "num_cpus",
  "rapier2d",
  "rapier2d-f64",
- "rapier3d",
+ "rapier3d 0.30.0",
+ "rapier3d 0.30.1",
  "rapier3d-f64",
  "salva2d",
  "salva2d-f64",
@@ -956,6 +957,30 @@ dependencies = [
 
 [[package]]
 name = "rapier3d"
+version = "0.30.0"
+source = "git+https://github.com/dimforge/rapier?rev=3ac5ed44915a01e89d2ed8bde4d07147f5b0ba84#3ac5ed44915a01e89d2ed8bde4d07147f5b0ba84"
+dependencies = [
+ "approx",
+ "arrayvec",
+ "bit-vec",
+ "bitflags",
+ "downcast-rs",
+ "log",
+ "nalgebra",
+ "num-derive",
+ "num-traits",
+ "ordered-float",
+ "parry3d",
+ "profiling",
+ "rustc-hash",
+ "simba",
+ "static_assertions",
+ "thiserror",
+ "wide",
+]
+
+[[package]]
+name = "rapier3d"
 version = "0.30.1"
 source = "git+https://github.com/ughuuu/rapier?branch=master#b384dd97f28dd17c3bfc41750a88cff3b5f1005e"
 dependencies = [
@@ -1151,7 +1176,7 @@ dependencies = [
  "nalgebra",
  "num-traits",
  "parry3d",
- "rapier3d",
+ "rapier3d 0.30.1",
  "rayon",
 ]
 

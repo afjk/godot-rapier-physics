@@ -31,6 +31,17 @@ jobs:
         shell: sh
         run: |
           cargo test --all-targets --features="build3d,test" --no-default-features
+  run-scenesync-parity-3d:
+    name: Run SceneSync Rapier 0.30 Parity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run SceneSync parity fixtures
+        shell: sh
+        run: |
+          cargo test --locked --no-default-features \
+            --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity" \
+            --lib scenesync_parity
   run-integration-tests-2d:
     name: Run Integration Tests 2D
     runs-on: macos-latest

@@ -23,6 +23,7 @@ double = ["godot/double-precision"]
 api-custom = ["godot/api-custom"]
 enhanced-determinism = ["rapier2d/enhanced-determinism", "rapier2d-f64/enhanced-determinism", "rapier3d/enhanced-determinism", "rapier3d-f64/enhanced-determinism"]
 serde-serialize = ["serde", "hashbrown/serde", "bincode", "serde_json", "godot/serde", "rapier2d/serde-serialize", "rapier2d-f64/serde-serialize", "rapier3d/serde-serialize", "rapier3d-f64/serde-serialize" ]
+scenesync-parity = ["dep:scenesync-rapier3d"]
 # Note: SIMD disabled for f64 builds due to upstream rapier bugs with f64 SIMD implementation
 # simd-nightly = ["rapier2d/simd-nightly", "rapier2d-f64/simd-nightly", "rapier3d/simd-nightly", "rapier3d-f64/simd-nightly"]
 # simd-nightly = ["rapier2d/simd-nightly", "rapier2d-f64/simd-nightly", "rapier3d/simd-nightly", "rapier3d-f64/simd-nightly"]
@@ -56,6 +57,10 @@ salva3d = { git = "https://github.com/ughuuu/salva", branch = "custom-changes", 
 salva3d-f64 = { git = "https://github.com/ughuuu/salva", branch = "custom-changes", features = ["rapier"], optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
+# SceneSync's canonical profile is pinned to the upstream core used by the
+# browser deterministic-compat package. Keep this separate from the patched
+# Rapier dependency used by Godot's PhysicsServer implementation.
+scenesync-rapier3d = { package = "rapier3d", git = "https://github.com/dimforge/rapier", rev = "3ac5ed44915a01e89d2ed8bde4d07147f5b0ba84", features = ["enhanced-determinism"], optional = true }
 
 [patch.crates-io]
 rapier2d = {git = "https://github.com/ughuuu/rapier", branch = "master"}
