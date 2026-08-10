@@ -68,28 +68,28 @@ After installing, go to `Advanced Settings` -> `Physics` -> `2D` or `3D`. Change
 
 ## SceneSync Rapier 0.30 parity build
 
-This fork has an optional `scenesync-parity` feature for Godot 4.6 projects that
+This fork has a minimal `scenesync-runtime` build for Godot 4.6 projects that
 must reproduce the SceneSync browser physics profile exactly. It embeds upstream
-Rapier 3D core `0.30.0` with `enhanced-determinism` alongside the plugin's normal
-patched Rapier backend:
+Rapier 3D core `0.30.0` with `enhanced-determinism` without compiling the
+unrelated PhysicsServer, fluid, editor plugin, or sample modules:
 
 ```bash
 cargo build --release --locked --no-default-features \
-  --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity"
+  --features="scenesync-runtime,api-4-6"
 ```
 
 The feature registers `SceneSyncRapierWorld3D`, a separate deterministic world
 with `configure`, `add_body`, `remove_body`, `step_to`, `get_body_state`, and
 `get_canonical_state_hash` methods. `add_body` accepts SceneSync wire field names.
-The standard `Rapier3D` PhysicsServer remains unchanged and continues to use the
-plugin's patched Rapier dependency; only `SceneSyncRapierWorld3D` is pinned to the
-canonical SceneSync core.
+Standard Rapier2D/Rapier3D builds remain on `godot-rust 0.4.5` and are unaffected
+by this feature. The SceneSync-only build uses `godot-rust 0.5.3` for its Godot
+4.6 API and Android runtime support.
 
 Run the shared-profile hash tests with:
 
 ```bash
 cargo test --locked --no-default-features \
-  --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity" \
+  --features="scenesync-runtime,api-4-6" \
   --lib scenesync_parity
 ```
 
@@ -97,9 +97,8 @@ Prebuilt SceneSync releases are published from fixed `scenesync-v*` tags. The
 combined addon archive contains Godot 4.6.3 binaries for Linux x86_64, Windows
 x86_64, macOS universal (arm64 and x86_64), and Android arm64. Copy its `addons`
 directory into the Godot project and verify the archive against `SHA256SUMS`.
-The extension is generated against Godot's forward-compatible 4.5 GDExtension
-API because `godot-rust 0.4.5` cannot generate bindings from the 4.6.3 API; the
-addon descriptor requires Godot 4.6 or newer.
+The extension is built with `godot-rust 0.5.3` against the Godot 4.6
+GDExtension API, and the minimal addon descriptor requires Godot 4.6 or newer.
 
 Every release is gated by the browser-compatible freefall, contact, and rotating
 contact hashes on Linux x86_64/arm64, Windows x86_64, and macOS x86_64/arm64.

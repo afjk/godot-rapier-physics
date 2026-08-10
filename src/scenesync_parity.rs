@@ -506,6 +506,9 @@ impl SceneSyncRapierWorld3D {
         let Some(state) = self.world.body_state(&stable_id.to_string()) else {
             return result;
         };
+        #[cfg(feature = "scenesync-runtime")]
+        result.set("id", &stable_id.to_variant());
+        #[cfg(not(feature = "scenesync-runtime"))]
         result.set("id", stable_id);
         result.set("fixed", state.fixed);
         result.set(
