@@ -88,7 +88,7 @@ impl RapierDirectSpaceStateImpl {
                     && let Ok(object) =
                         Gd::<Node>::try_from_instance_id(InstanceId::from_i64(instance_id as i64))
                 {
-                    result.set_collider(object)
+                    unsafe { result.set_collider(object) }
                 }
             }
             #[cfg(feature = "dim3")]
@@ -166,7 +166,7 @@ impl RapierDirectSpaceStateImpl {
                     && let Ok(object) =
                         Gd::<Node>::try_from_instance_id(InstanceId::from_i64(instance_id as i64))
                 {
-                    result_slice.set_collider(object)
+                    unsafe { result_slice.set_collider(object) }
                 }
             }
         }
@@ -239,7 +239,7 @@ impl RapierDirectSpaceStateImpl {
                     && let Ok(object) =
                         Gd::<Node>::try_from_instance_id(InstanceId::from_i64(instance_id as i64))
                 {
-                    results_slice[cpt].set_collider(object)
+                    unsafe { results_slice[cpt].set_collider(object) }
                 }
             }
             cpt += 1;
