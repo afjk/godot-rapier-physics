@@ -97,6 +97,9 @@ Prebuilt SceneSync releases are published from fixed `scenesync-v*` tags. The
 combined addon archive contains Godot 4.6.3 binaries for Linux x86_64, Windows
 x86_64, macOS universal (arm64 and x86_64), and Android arm64. Copy its `addons`
 directory into the Godot project and verify the archive against `SHA256SUMS`.
+The extension is generated against Godot's forward-compatible 4.5 GDExtension
+API because `godot-rust 0.4.5` cannot generate bindings from the 4.6.3 API; the
+addon descriptor requires Godot 4.6 or newer.
 
 Every release is gated by the browser-compatible freefall, contact, and rotating
 contact hashes on Linux x86_64/arm64, Windows x86_64, and macOS x86_64/arm64.
