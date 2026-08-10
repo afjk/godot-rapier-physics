@@ -20,6 +20,8 @@ mod fluids;
 mod joints;
 mod nodes;
 mod rapier_wrapper;
+#[cfg(all(feature = "scenesync-parity", feature = "single", feature = "dim3"))]
+pub mod scenesync_parity;
 mod servers;
 mod shapes;
 mod spaces;

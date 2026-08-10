@@ -66,6 +66,33 @@ Exact simulation every time (on same platform)|Exact simulation on multiple plat
 
 After installing, go to `Advanced Settings` -> `Physics` -> `2D` or `3D`. Change `Physics Engine` to `Rapier2D` or `Rapier3D`.
 
+## SceneSync Rapier 0.30 parity build
+
+This fork has an optional `scenesync-parity` feature for Godot 4.6 projects that
+must reproduce the SceneSync browser physics profile exactly. It embeds upstream
+Rapier 3D core `0.30.0` with `enhanced-determinism` alongside the plugin's normal
+patched Rapier backend:
+
+```bash
+cargo build --release --locked --no-default-features \
+  --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity"
+```
+
+The feature registers `SceneSyncRapierWorld3D`, a separate deterministic world
+with `configure`, `add_body`, `remove_body`, `step_to`, `get_body_state`, and
+`get_canonical_state_hash` methods. `add_body` accepts SceneSync wire field names.
+The standard `Rapier3D` PhysicsServer remains unchanged and continues to use the
+plugin's patched Rapier dependency; only `SceneSyncRapierWorld3D` is pinned to the
+canonical SceneSync core.
+
+Run the shared-profile hash tests with:
+
+```bash
+cargo test --locked --no-default-features \
+  --features="single-dim3,serde-serialize,enhanced-determinism,scenesync-parity" \
+  --lib scenesync_parity
+```
+
 # Youtube Videos
 
 GamesFromScratch:
